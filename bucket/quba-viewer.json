@@ -6,14 +6,14 @@
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
     "checkver": "github",
     "autoupdate": {
-    "note": "Thanks for using autoupdate, please test your updates!",
-    "architecture": {
-        "64bit": {
-            "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
-        },
-        "32bit": {
-            "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
+        "note": "Thanks for using autoupdate, please test your updates!",
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
+            },
+            "32bit": {
+                "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
+                }
             }
-        }
     }
 }
