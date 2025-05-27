@@ -1,9 +1,6 @@
 {
     "version": "1.4.2",
-    "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v1.4.2/Quba.1.4.2.msi",
-    "extract_dir": "quba-viewer",
     "license": "Apache-2.0",
-    "bin": "quba-viewer.ps1",
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
     "checkver": "github",
     "autoupdate": {
