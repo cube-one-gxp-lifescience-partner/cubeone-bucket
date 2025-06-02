@@ -1,5 +1,5 @@
 {
-    "version": "1.4.2",
+    "version": "1.5.0",
     "license": "Apache-2.0",
     "url": "https://github.com/ZUGFeRD/quba-viewer/",
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
@@ -11,7 +11,7 @@
             },
             "32bit": {
                 "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
-                }
             }
+        }
     }
 }
