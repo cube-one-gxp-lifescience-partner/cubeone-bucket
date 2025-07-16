@@ -4,6 +4,12 @@
     "homepage": "https://www.microsoft.com/microsoft-teams/download-app",
     "license": "Proprietary",
     "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe",
+    "installer": {
+        "script": [
+            "Write-Host 'Teams setup downloaded - NOT installing automatically!' -ForegroundColor Green",
+            "Write-Host 'Use the MS Teams Setup shortcut to install manually' -ForegroundColor Cyan"
+        ]
+    },
     "bin": "MSTeamsSetup.exe",
     "shortcuts": [
         [
@@ -12,7 +18,7 @@
         ]
     ],
     "post_install": [
-        "Write-Host 'Teams setup downloaded successfully!' -ForegroundColor Green",
+        "Write-Host 'Teams setup ready!' -ForegroundColor Green",
         "Write-Host 'Setting up GPU fix for future installation...' -ForegroundColor Yellow",
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
         "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
