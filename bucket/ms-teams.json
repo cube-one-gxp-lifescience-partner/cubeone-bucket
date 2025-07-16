@@ -1,17 +1,34 @@
 {
-    "version": "latest",
-    "description": "Microsoft Teams (New App) with GPU fix",
+    "version": "1.8.00.17054",
+    "description": "Microsoft Teams (New App) - Direct installer",
     "homepage": "https://www.microsoft.com/microsoft-teams/download-app",
     "license": "Proprietary",
-    "url": "https://go.microsoft.com/fwlink/?linkid=2196106",
+    "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe",
     "hash": "sha256:auto",
+    "installer": {
+        "args": ["/S"],
+        "keep": true
+    },
     "post_install": [
-        "Write-Host 'Installing Teams...' -ForegroundColor Green",
-        "Start-Process -FilePath \`$dir\\teamsbootstrapper.exe -ArgumentList '-p' -Wait -NoNewWindow",
-        "Write-Host 'Setting GPU fix...' -ForegroundColor Yellow",
+        "Write-Host 'Teams installed successfully!' -ForegroundColor Green",
+        "Write-Host 'Setting up GPU fix for white screen issue...' -ForegroundColor Yellow",
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
-        "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force",
-        "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord",
-        "Write-Host 'Teams installed successfully!' -ForegroundColor Green"
-    ]
+        "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
+        "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord -ErrorAction SilentlyContinue",
+        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green",
+        "Write-Host 'Restart PowerShell and launch Teams from Start Menu' -ForegroundColor Cyan"
+    ],
+    "uninstaller": {
+        "script": [
+            "Get-AppxPackage -Name 'MSTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
+            "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue"
+        ]
+    },
+    "checkver": {
+        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/",
+        "regex": "MSTeamsSetup\\.exe"
+    },
+    "autoupdate": {
+        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe"
+    }
 }
