@@ -7,7 +7,7 @@
     "bin": "lockzz.exe",
     "shortcuts": [
         [
-            "lockzz.exe",
+            "lockzz\\lockzz.exe",
             "lockzz"
         ]
     ],
