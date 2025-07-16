@@ -12,8 +12,7 @@
         "keep": true
     },
     "post_install": [
-        "Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green",
-        "Write-Host 'You can configure VPN connections via the GUI or registry.' -ForegroundColor Cyan"
+        "Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green"
     ],
     "uninstaller": {
         "script": [
@@ -49,13 +48,7 @@
         ]
     },
     "bin": [
-        "FortiClient.exe"
-    ],
-    "shortcuts": [
-        [
-            "FortiClient.exe",
-            "FortiClient VPN"
-        ]
+        "FortiClientVPNInstaller.exe"
     ],
     "checkver": {
         "url": "https://filestore.fortinet.com/forticlient/downloads/",
