@@ -4,50 +4,48 @@
     "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "Proprietary",
     "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.exe",
-    "pre_install": [
-        "Write-Host 'Renaming MSI to prevent extraction...' -ForegroundColor Yellow",
-        "Rename-Item -Path \"$dir\\FortiClientVPN.exe\" -NewName \"FortiClientVPN.msi\" -Force"
-    ],
     "installer": {
         "script": [
-            "Write-Host 'Installing...' -ForegroundColor Green",
-            "$msiPath = \"$dir\\FortiClientVPN.msi\"",
+            "Write-Host 'Installing FortiClient VPN with /passive /norestart...' -ForegroundColor Green",
+            "$msiPath = \"$dir\\FortiClientVPN.exe\"",
             "Write-Host \"Executing: msiexec /i `\"$msiPath`\" /passive /norestart\" -ForegroundColor Cyan",
             "$process = Start-Process -FilePath 'msiexec' -ArgumentList '/i', \"`\"$msiPath`\"\", '/passive', '/norestart' -Wait -PassThru -NoNewWindow",
-            "if ($process.ExitCode -eq 0) {",
-            "    Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green",
-            "} else {",
-            "    Write-Host \"Installation failed with exit code: $($process.ExitCode)\" -ForegroundColor Red",
-            "    exit $process.ExitCode",
+            "switch ($process.ExitCode) {",
+            "    0 { Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green }",
+            "    3010 { Write-Host 'FortiClient VPN installed successfully! (Reboot recommended)' -ForegroundColor Green }",
+            "    1641 { Write-Host 'FortiClient VPN installed successfully! (Reboot initiated)' -ForegroundColor Green }",
+            "    default {",
+            "        Write-Host \"Installation failed with exit code: $($process.ExitCode)\" -ForegroundColor Red",
+            "        exit $process.ExitCode",
+            "    }",
             "}"
         ]
     },
     "post_install": [
-        "Write-Host 'FortiClient VPN installation completed!' -ForegroundColor Green"
+        "Remove-Item -Path \"$dir\\FortiClientVPN.exe\" -Force -ErrorAction SilentlyContinue",
+        "Write-Host 'FortiClient VPN installation completed with /passive /norestart!' -ForegroundColor Green",
+        "Write-Host 'Note: A reboot may be required for full functionality.' -ForegroundColor Yellow"
     ],
     "uninstaller": {
         "script": [
             "Write-Host 'Uninstalling FortiClient VPN...' -ForegroundColor Yellow",
             "Get-Process -Name 'FortiClient*' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
-            "Start-Sleep -Seconds 2",
             "$uninstallKeys = @(",
             "    'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
             "    'HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
             ")",
-            "$found = $false",
             "foreach ($key in $uninstallKeys) {",
             "    Get-ItemProperty -Path $key -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*FortiClient*' } | ForEach-Object {",
-            "        $found = $true",
             "        Write-Host \"Uninstalling: $($_.DisplayName)\" -ForegroundColor Cyan",
             "        $productCode = $_.PSChildName",
             "        $process = Start-Process -FilePath 'msiexec' -ArgumentList '/x', $productCode, '/passive', '/norestart' -Wait -PassThru -NoNewWindow",
-            "        if ($process.ExitCode -eq 0) {",
-            "            Write-Host \"Successfully uninstalled: $($_.DisplayName)\" -ForegroundColor Green",
+            "        switch ($process.ExitCode) {",
+            "            0 { Write-Host \"Successfully uninstalled: $($_.DisplayName)\" -ForegroundColor Green }",
+            "            3010 { Write-Host \"Successfully uninstalled: $($_.DisplayName) (Reboot recommended)\" -ForegroundColor Green }",
+            "            1605 { Write-Host \"Product not found (already uninstalled): $($_.DisplayName)\" -ForegroundColor Yellow }",
+            "            default { Write-Host \"Uninstall failed with exit code: $($process.ExitCode)\" -ForegroundColor Red }",
             "        }",
             "    }",
-            "}",
-            "if (-not $found) {",
-            "    Write-Host 'No FortiClient installation found in registry' -ForegroundColor Yellow",
             "}",
             "Write-Host 'FortiClient VPN uninstall completed!' -ForegroundColor Green"
         ]
@@ -58,6 +56,6 @@
         "regex": "^v?([\\d.]+(?:-[\\w.]+)?)$"
     },
     "autoupdate": {
-        "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/$version/FortiClientVPN.msi"
+        "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/$version/FortiClientVPN.exe"
     }
 }
