@@ -3,11 +3,7 @@
     "description": "lockzz - Portable application from cube one",
     "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://git.cubeone.de/api/v4/projects/9/repository/files/additional_software/lockzz.zip/raw?ref=main",
-    "headers": {
-        "Authorization": "Bearer $env:GITLAB_PAT",
-        "User-Agent": "Scoop/1.0"
-    },
+    "url": "https://git.cubeone.de/marvin.fenssel/auto-updater/-/raw/main/additional_software/lockzz.zip?private_token=$env:GITLAB_PAT",
     "extract_dir": "lockzz",
     "bin": "lockzz.exe",
     "shortcuts": [
@@ -18,7 +14,7 @@
     ],
     "pre_install": [
         "if (-not $env:GITLAB_PAT) { throw 'GITLAB_PAT environment variable not set' }",
-        "Write-Host 'Downloading lockzz from cube one GitLab...' -ForegroundColor Blue"
+        "Write-Host 'Downloading lockzz with private token...' -ForegroundColor Blue"
     ],
     "post_install": [
         "Write-Host 'lockzz installed successfully!' -ForegroundColor Green"
