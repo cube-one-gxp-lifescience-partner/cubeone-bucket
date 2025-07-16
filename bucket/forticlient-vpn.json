@@ -1,0 +1,67 @@
+{
+    "version": "7.4.3",
+    "description": "FortiClient VPN - SSL VPN client for secure remote access",
+    "homepage": "https://www.fortinet.com/products/endpoint-security/forticlient",
+    "license": "Proprietary",
+    "url": "https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller.exe",
+    "installer": {
+        "args": [
+            "/quiet",
+            "/norestart"
+        ],
+        "keep": true
+    },
+    "post_install": [
+        "Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green",
+        "Write-Host 'You can configure VPN connections via the GUI or registry.' -ForegroundColor Cyan"
+    ],
+    "uninstaller": {
+        "script": [
+            "Write-Host 'Uninstalling FortiClient VPN...' -ForegroundColor Yellow",
+            "# Versuche über Programme und Features zu deinstallieren",
+            "$uninstallKeys = @(",
+            "    'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
+            "    'HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
+            ")",
+            "foreach ($key in $uninstallKeys) {",
+            "    Get-ItemProperty -Path $key -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*FortiClient*' } | ForEach-Object {",
+            "        if ($_.UninstallString) {",
+            "            Write-Host \"Found FortiClient: $($_.DisplayName)\" -ForegroundColor Cyan",
+            "            if ($_.UninstallString -like '*msiexec*') {",
+            "                # MSI-Deinstallation",
+            "                $productCode = $_.PSChildName",
+            "                Start-Process -FilePath 'msiexec' -ArgumentList '/x', $productCode, '/quiet', '/norestart' -Wait -NoNewWindow",
+            "            } else {",
+            "                # EXE-Deinstallation",
+            "                $uninstallCmd = $_.UninstallString",
+            "                if ($uninstallCmd -notlike '*quiet*') {",
+            "                    $uninstallCmd += ' /quiet'",
+            "                }",
+            "                if ($uninstallCmd -notlike '*norestart*') {",
+            "                    $uninstallCmd += ' /norestart'",
+            "                }",
+            "                Start-Process -FilePath 'cmd' -ArgumentList '/c', $uninstallCmd -Wait -NoNewWindow",
+            "            }",
+            "        }",
+            "    }",
+            "}",
+            "Write-Host 'FortiClient VPN uninstalled!' -ForegroundColor Green"
+        ]
+    },
+    "bin": [
+        "FortiClient.exe"
+    ],
+    "shortcuts": [
+        [
+            "FortiClient.exe",
+            "FortiClient VPN"
+        ]
+    ],
+    "checkver": {
+        "url": "https://filestore.fortinet.com/forticlient/downloads/",
+        "regex": "FortiClientVPNInstaller_([\\d.]+)\\.exe"
+    },
+    "autoupdate": {
+        "url": "https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller_$version.exe"
+    }
+}
