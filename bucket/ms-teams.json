@@ -4,7 +4,7 @@
     "homepage": "https://www.microsoft.com/microsoft-teams/download-app",
     "license": "Proprietary",
     "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe",
-    "hash": "sha256:auto",
+    "hash": "c8db62bed2305b35860ba601c926f664da5c49cb58db6e364f0ed2805af511f0",
     "installer": {
         "args": ["/S"],
         "keep": true
@@ -15,20 +15,6 @@
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
         "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
         "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord -ErrorAction SilentlyContinue",
-        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green",
-        "Write-Host 'Restart PowerShell and launch Teams from Start Menu' -ForegroundColor Cyan"
-    ],
-    "uninstaller": {
-        "script": [
-            "Get-AppxPackage -Name 'MSTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
-            "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue"
-        ]
-    },
-    "checkver": {
-        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/",
-        "regex": "MSTeamsSetup\\.exe"
-    },
-    "autoupdate": {
-        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe"
-    }
+        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green"
+    ]
 }
