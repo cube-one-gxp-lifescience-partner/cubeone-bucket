@@ -1,9 +1,13 @@
 {
     "version": "1.0.0",
     "description": "lockzz - Portable application from cube one",
-    "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
+    "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/lockzz.zip",
+    "url": "https://git.cubeone.de/marvin.fenssel/auto-updater/-/raw/main/additional_software/lockzz.zip",
+    "headers": {
+        "Authorization": "Bearer $env:GITLAB_PAT",
+        "User-Agent": "cube-one-auto-updater/1.0"
+    },
     "extract_dir": "lockzz",
     "bin": "lockzz.exe",
     "shortcuts": [
@@ -12,12 +16,18 @@
             "lockzz"
         ]
     ],
+    "pre_install": [
+        "if (-not $env:GITLAB_PAT) { throw 'GITLAB_PAT environment variable not set' }",
+        "Write-Host 'Using GitLab authentication for download...'"
+    ],
     "post_install": [
-        "Write-Host 'lockzz has been installed successfully.'",
+        "Write-Host 'lockzz has been installed successfully from cube one GitLab.'",
         "Write-Host 'Run \"lockzz\" from command line to start the application.'"
     ],
     "notes": [
         "Portable application from cube one GmbH",
+        "Downloaded from private GitLab repository",
+        "Requires GITLAB_PAT environment variable for authentication",
         "No installation required - runs directly from extracted folder",
         "Available as 'lockzz' command in terminal after installation"
     ]
