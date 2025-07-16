@@ -4,7 +4,6 @@
     "homepage": "https://cloud.cubeone.de",
     "license": "Proprietary",
     "url": "https://httpbin.org/robots.txt",
-    "hash": "skip",
     "pre_install": [
         "# Lösche die Dummy-Datei",
         "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
