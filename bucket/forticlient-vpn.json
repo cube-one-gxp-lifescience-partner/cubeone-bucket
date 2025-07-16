@@ -51,8 +51,27 @@
         "FortiClientVPNInstaller.exe"
     ],
     "checkver": {
-        "url": "https://filestore.fortinet.com/forticlient/downloads/",
-        "regex": "FortiClientVPNInstaller_([\\d.]+)\\.exe"
+        "script": [
+            "$url = 'https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller.exe'",
+            "$tempFile = New-TemporaryFile",
+            "try {",
+            "    Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing",
+            "    $versionInfo = (Get-ItemProperty $tempFile).VersionInfo",
+            "    $version = $versionInfo.ProductVersion",
+            "    if (!$version -or $version -eq '0.0.0.0') {",
+            "        $version = $versionInfo.FileVersion",
+            "    }",
+            "    if (!$version -or $version -eq '0.0.0.0') {",
+            "        $hash = (Get-FileHash $tempFile -Algorithm SHA256).Hash",
+            "        $version = $hash.Substring(0,8)",
+            "    }",
+            "    Write-Output $version",
+            "} catch {",
+            "    Write-Output (Get-Date -Format 'yyyy.MM.dd.HHmm')",
+            "} finally {",
+            "    Remove-Item $tempFile -ErrorAction SilentlyContinue",
+            "}"
+        ]
     },
     "autoupdate": {
         "url": "https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller_$version.exe"
