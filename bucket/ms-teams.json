@@ -1,27 +1,29 @@
 {
     "version": "1.7.00.31111",
-    "description": "Microsoft Teams (New App) - Direct installer",
+    "description": "Microsoft Teams (New App) - Setup file with GPU fix",
     "homepage": "https://www.microsoft.com/microsoft-teams/download-app",
     "license": "Proprietary",
     "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe",
-    "installer": {
-        "args": ["/S"],
-        "keep": true
-    },
+    "bin": "MSTeamsSetup.exe",
+    "shortcuts": [
+        [
+            "MSTeamsSetup.exe",
+            "MS Teams Setup"
+        ]
+    ],
     "post_install": [
-        "Write-Host 'Teams installed successfully!' -ForegroundColor Green",
-        "Write-Host 'Setting up GPU fix...' -ForegroundColor Yellow",
+        "Write-Host 'Teams setup downloaded successfully!' -ForegroundColor Green",
+        "Write-Host 'Setting up GPU fix for future installation...' -ForegroundColor Yellow",
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
         "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
         "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord -ErrorAction SilentlyContinue",
-        "Write-Host 'GPU acceleration disabled!' -ForegroundColor Green"
+        "Write-Host 'GPU acceleration disabled for future Teams installation!' -ForegroundColor Green",
+        "Write-Host 'Use the \"MS Teams Setup\" shortcut to install Teams manually' -ForegroundColor Cyan"
     ],
     "uninstaller": {
         "script": [
             "Write-Host 'Uninstalling Teams...' -ForegroundColor Yellow",
-            "# Teams über winget deinstallieren",
             "winget uninstall Microsoft.Teams --silent --accept-source-agreements 2>$null",
-            "# Teams über normale Deinstallation",
             "$uninstallKeys = @(",
             "    'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
             "    'HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
@@ -40,7 +42,6 @@
             "        }",
             "    }",
             "}",
-            "# Aufräumen",
             "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -Recurse -ErrorAction SilentlyContinue",
             "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', $null, 'User')",
             "Write-Host 'Teams uninstalled!' -ForegroundColor Green"
