@@ -3,10 +3,10 @@
     "description": "lockzz - Portable application from cube one",
     "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://git.cubeone.de/api/v4/projects/marvin.fenssel/auto-updater/repository/files/additional_software/lockzz.zip/raw?ref=main",
+    "url": "https://git.cubeone.de/api/v4/projects/9/repository/files/additional_software%2Flockzz.zip/raw?ref=main",
     "headers": {
         "Authorization": "Bearer $env:GITLAB_PAT",
-        "User-Agent": "cube-one-auto-updater/1.0"
+        "User-Agent": "Scoop/1.0"
     },
     "extract_dir": "lockzz",
     "bin": "lockzz.exe",
@@ -18,26 +18,9 @@
     ],
     "pre_install": [
         "if (-not $env:GITLAB_PAT) { throw 'GITLAB_PAT environment variable not set' }",
-        "Write-Host 'Downloading lockzz from cube one GitLab via API...' -ForegroundColor Blue"
+        "Write-Host 'Downloading lockzz from cube one GitLab...' -ForegroundColor Blue"
     ],
     "post_install": [
-        "Write-Host 'lockzz has been installed successfully from cube one GitLab.' -ForegroundColor Green",
-        "Write-Host 'Source: https://git.cubeone.de/marvin.fenssel/auto-updater' -ForegroundColor Blue",
-        "if (Test-Path \"$dir\\lockzz.exe\") {",
-        "    Write-Host '✅ lockzz.exe found and ready to use' -ForegroundColor Green",
-        "    Write-Host 'Run \"lockzz\" from command line to start the application.' -ForegroundColor Yellow",
-        "} else {",
-        "    Write-Host '⚠️ lockzz.exe not found in extracted files' -ForegroundColor Yellow",
-        "    Write-Host 'Available files:' -ForegroundColor Yellow",
-        "    Get-ChildItem \"$dir\" | ForEach-Object { Write-Host \"  - $($_.Name)\" -ForegroundColor Gray }",
-        "}"
-    ],
-    "notes": [
-        "Portable application from cube one GmbH",
-        "Downloaded from private GitLab repository via API",
-        "Requires GITLAB_PAT environment variable for authentication",
-        "Authentication handled automatically by cube one auto-updater",
-        "No installation required - runs directly from extracted folder",
-        "Available as 'lockzz' command in terminal after installation"
+        "Write-Host 'lockzz installed successfully!' -ForegroundColor Green"
     ]
 }
