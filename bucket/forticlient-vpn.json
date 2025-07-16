@@ -3,15 +3,14 @@
     "description": "FortiClient VPN - SSL VPN client for secure remote access",
     "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "Proprietary",
-    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.msi",
+    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.exe",
     "pre_install": [
         "Write-Host 'Renaming MSI to prevent extraction...' -ForegroundColor Yellow",
-        "Rename-Item -Path \"$dir\\FortiClientVPN.msi\" -NewName \"FortiClientVPN.msi_\" -Force"
+        "Rename-Item -Path \"$dir\\FortiClientVPN.exe\" -NewName \"FortiClientVPN.msi\" -Force"
     ],
     "installer": {
         "script": [
-            "Write-Host 'Renaming MSI back and installing...' -ForegroundColor Green",
-            "Rename-Item -Path \"$dir\\FortiClientVPN.msi_\" -NewName \"FortiClientVPN.msi\" -Force",
+            "Write-Host 'Installing...' -ForegroundColor Green",
             "$msiPath = \"$dir\\FortiClientVPN.msi\"",
             "Write-Host \"Executing: msiexec /i `\"$msiPath`\" /passive /norestart\" -ForegroundColor Cyan",
             "$process = Start-Process -FilePath 'msiexec' -ArgumentList '/i', \"`\"$msiPath`\"\", '/passive', '/norestart' -Wait -PassThru -NoNewWindow",
@@ -24,9 +23,7 @@
         ]
     },
     "post_install": [
-        "Write-Host 'Cleaning up installation files...' -ForegroundColor Yellow",
-        "Remove-Item -Path \"$dir\\FortiClientVPN.msi\" -Force -ErrorAction SilentlyContinue",
-        "Write-Host 'FortiClient VPN installation completed with /passive /norestart!' -ForegroundColor Green"
+        "Write-Host 'FortiClient VPN installation completed!' -ForegroundColor Green"
     ],
     "uninstaller": {
         "script": [
