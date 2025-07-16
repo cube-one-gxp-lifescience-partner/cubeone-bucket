@@ -10,47 +10,40 @@
     },
     "post_install": [
         "Write-Host 'Teams installed successfully!' -ForegroundColor Green",
-        "Write-Host 'Setting up GPU fix for white screen issue...' -ForegroundColor Yellow",
+        "Write-Host 'Setting up GPU fix...' -ForegroundColor Yellow",
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
         "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
         "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord -ErrorAction SilentlyContinue",
-        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green",
-        "# Speichere Installationsdatum für Update-Erkennung",
-        "Set-Content -Path \`$dir\\install-date.txt -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        "Write-Host 'GPU acceleration disabled!' -ForegroundColor Green"
     ],
     "uninstaller": {
         "script": [
-            "Write-Host 'Removing Teams...' -ForegroundColor Yellow",
-            "# Versuche Teams über verschiedene Methoden zu deinstallieren",
-            "Get-AppxPackage -Name 'MSTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
-            "Get-AppxPackage -Name 'MicrosoftTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
-            "Get-AppxPackage -Name '*Teams*' | Remove-AppxPackage -ErrorAction SilentlyContinue",
-            "# Versuche über Programme und Features",
-            "\`$uninstallString = (Get-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' | Where-Object { \`$_.DisplayName -like '*Teams*' }).UninstallString",
-            "if (\`$uninstallString) {",
-            "    Start-Process -FilePath \`$uninstallString -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction SilentlyContinue",
-            "}",
-            "# Lösche Registry-Einträge",
+            "Write-Host 'Uninstalling Teams...' -ForegroundColor Yellow",
+            "Get-AppxPackage -AllUsers | Where-Object { $_.Name -like '*Teams*' } | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue",
+            "Get-ItemProperty -Path @('HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*') -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Teams*' } | ForEach-Object { if ($_.UninstallString) { Start-Process -FilePath $_.UninstallString -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction SilentlyContinue } }",
+            "Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Teams*' } | ForEach-Object { if ($_.UninstallString) { Start-Process -FilePath $_.UninstallString -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction SilentlyContinue } }",
             "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -Recurse -ErrorAction SilentlyContinue",
-            "# Lösche Umgebungsvariable",
-            "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', \`$null, 'User')",
-            "Write-Host 'Teams deinstalliert!' -ForegroundColor Green"
+            "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', $null, 'User')",
+            "Write-Host 'Teams uninstalled!' -ForegroundColor Green"
         ]
     },
     "checkver": {
         "script": [
-            "# Prüfe auf neue Version durch Herunterladen der Datei",
-            "\`$url = 'https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe'",
-            "\`$tempFile = New-TemporaryFile",
+            "$url = 'https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe'",
+            "$tempFile = New-TemporaryFile",
             "try {",
-            "    Invoke-WebRequest -Uri \`$url -OutFile \`$tempFile -UseBasicParsing",
-            "    \`$version = (Get-ItemProperty \`$tempFile).VersionInfo.ProductVersion",
-            "    if (!\`$version) {",
-            "        \`$version = Get-Date -Format 'yyyy.MM.dd.HHmm'",
+            "    Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing",
+            "    $fileInfo = Get-Item $tempFile",
+            "    $version = $fileInfo.VersionInfo.ProductVersion",
+            "    if (!$version) {",
+            "        $hash = (Get-FileHash $tempFile -Algorithm SHA256).Hash",
+            "        $version = $hash.Substring(0,8)",
             "    }",
-            "    Write-Output \`$version",
+            "    Write-Output $version",
+            "} catch {",
+            "    Write-Output (Get-Date -Format 'yyyy.MM.dd.HHmm')",
             "} finally {",
-            "    Remove-Item \`$tempFile -ErrorAction SilentlyContinue",
+            "    Remove-Item $tempFile -ErrorAction SilentlyContinue",
             "}"
         ]
     },
