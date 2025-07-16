@@ -3,11 +3,10 @@
     "description": "lockzz - Portable application from cube one",
     "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://git.cubeone.de/marvin.fenssel/auto-updater/-/raw/main/additional_software/lockzz.zip",
+    "url": "https://git.cubeone.de/api/v4/projects/marvin.fenssel%2Fauto-updater/repository/files/additional_software%2Flockzz.zip/raw?ref=main",
     "headers": {
         "Authorization": "Bearer $env:GITLAB_PAT",
-        "User-Agent": "cube-one-auto-updater/1.0",
-        "Accept": "application/octet-stream"
+        "User-Agent": "cube-one-auto-updater/1.0"
     },
     "extract_dir": "lockzz",
     "bin": "lockzz.exe",
@@ -18,30 +17,24 @@
         ]
     ],
     "pre_install": [
-        "# Prüfe GitLab PAT",
-        "if (-not $env:GITLAB_PAT) {",
-        "    throw 'GITLAB_PAT environment variable not set. Please ensure auto-updater has set the GitLab PAT.'",
-        "}",
-        "if ($env:GITLAB_PAT -notmatch '^glpat-[a-zA-Z0-9_-]{20,}$') {",
-        "    Write-Warning 'GitLab PAT format seems invalid but proceeding anyway...'",
-        "}",
-        "Write-Host 'Using GitLab authentication for download from cube one repository...'",
-        "Write-Host 'PAT Preview: ' + $env:GITLAB_PAT.Substring(0, 8) + '...' + $env:GITLAB_PAT.Substring($env:GITLAB_PAT.Length - 4)"
+        "if (-not $env:GITLAB_PAT) { throw 'GITLAB_PAT environment variable not set' }",
+        "Write-Host 'Downloading lockzz from cube one GitLab via API...' -ForegroundColor Blue"
     ],
     "post_install": [
         "Write-Host 'lockzz has been installed successfully from cube one GitLab.' -ForegroundColor Green",
         "Write-Host 'Source: https://git.cubeone.de/marvin.fenssel/auto-updater' -ForegroundColor Blue",
-        "Write-Host 'Run \"lockzz\" from command line to start the application.' -ForegroundColor Yellow",
-        "# Teste ob die Executable existiert",
         "if (Test-Path \"$dir\\lockzz.exe\") {",
-        "    Write-Host '✓ lockzz.exe found and ready to use' -ForegroundColor Green",
+        "    Write-Host '✅ lockzz.exe found and ready to use' -ForegroundColor Green",
+        "    Write-Host 'Run \"lockzz\" from command line to start the application.' -ForegroundColor Yellow",
         "} else {",
-        "    Write-Warning '⚠ lockzz.exe not found in extracted files'",
+        "    Write-Host '⚠️ lockzz.exe not found in extracted files' -ForegroundColor Yellow",
+        "    Write-Host 'Available files:' -ForegroundColor Yellow",
+        "    Get-ChildItem \"$dir\" | ForEach-Object { Write-Host \"  - $($_.Name)\" -ForegroundColor Gray }",
         "}"
     ],
     "notes": [
         "Portable application from cube one GmbH",
-        "Downloaded from private GitLab repository: git.cubeone.de/marvin.fenssel/auto-updater",
+        "Downloaded from private GitLab repository via API",
         "Requires GITLAB_PAT environment variable for authentication",
         "Authentication handled automatically by cube one auto-updater",
         "No installation required - runs directly from extracted folder",
