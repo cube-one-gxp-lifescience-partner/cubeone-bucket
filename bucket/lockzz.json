@@ -4,7 +4,6 @@
     "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "Proprietary",
     "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/lockzz.zip",
-    "hash": "skip",
     "extract_dir": "lockzz",
     "bin": "lockzz.exe",
     "shortcuts": [
