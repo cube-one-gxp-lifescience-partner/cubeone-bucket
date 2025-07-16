@@ -21,9 +21,10 @@
             "}"
         ]
     },
+    "bin": "Quba\\Quba.exe",
     "shortcuts": [
         [
-            "Quba.exe",
+            "Quba\\Quba.exe",
             "Quba Viewer"
         ]
     ],
@@ -32,6 +33,9 @@
         "regex": "tag/v([\\d.]+)"
     },
     "autoupdate": {
-        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
+        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi",
+        "hash": {
+            "mode": "download"
+        }
     }
 }
