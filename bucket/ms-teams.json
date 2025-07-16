@@ -10,6 +10,7 @@
             "Write-Host 'Use the MS Teams Setup shortcut to install manually' -ForegroundColor Cyan"
         ]
     },
+    "bin": "MSTeamsSetup.exe",
     "shortcuts": [
         [
             "MSTeamsSetup.exe",
