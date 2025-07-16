@@ -11,12 +11,6 @@
         ]
     },
     "bin": "MSTeamsSetup.exe",
-    "shortcuts": [
-        [
-            "MSTeamsSetup.exe",
-            "MS Teams Setup"
-        ]
-    ],
     "post_install": [
         "Write-Host 'Teams setup ready!' -ForegroundColor Green",
         "Write-Host 'Setting up GPU fix for future installation...' -ForegroundColor Yellow",
