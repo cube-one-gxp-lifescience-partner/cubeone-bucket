@@ -4,7 +4,7 @@
     "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
     "url": "https://httpbin.org/robots.txt",
-    "bin": "lockzz.exe",
+    "bin": "lockzz\\lockzz.exe",
     "shortcuts": [
         [
             "lockzz\\lockzz.exe",
