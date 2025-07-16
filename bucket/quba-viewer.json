@@ -3,13 +3,25 @@
     "description": "Quba is a cross-platform viewer for electronic invoices (ZUGFeRD/Factur-X)",
     "license": "Apache-2.0",
     "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v1.5.0/Quba.1.5.0.msi",
-    "hash": "d8d3013518f70e9340d0f2ea97fe7af1c96bfd2f3131bd9804e19c7740e6fcbd",
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
     "depends": "lessmsi",
     "installer": {
         "script": [
-            "Expand-MsiArchive -Path $dir\\Quba.$version.msi -ExtractDir 'PFiles\\Quba' -Destination $dir",
-            "Remove-Item -Path $dir\\*.msi -Force"
+            "Write-Host 'Extracting MSI...' -ForegroundColor Green",
+            "try {",
+            "    Expand-MsiArchive -Path $dir\\Quba.$version.msi -Destination $dir",
+            "} catch {",
+            "    Write-Host 'lessmsi failed, trying msiexec...' -ForegroundColor Yellow",
+            "    Start-Process -FilePath 'msiexec' -ArgumentList '/a', $dir\\Quba.$version.msi, '/qn', \"TARGETDIR=$dir\" -Wait -NoNewWindow",
+            "}",
+            "# Finde die ausführbare Datei",
+            "$exe = Get-ChildItem -Path $dir -Recurse -Name '*.exe' | Where-Object { $_ -like '*Quba*' } | Select-Object -First 1",
+            "if ($exe) {",
+            "    $exePath = Join-Path $dir $exe",
+            "    $exeDir = Split-Path $exePath",
+            "    Get-ChildItem -Path $exeDir -Recurse | Move-Item -Destination $dir -Force",
+            "}",
+            "Remove-Item -Path $dir\\*.msi -Force -ErrorAction SilentlyContinue"
         ]
     },
     "bin": "Quba.exe",
@@ -24,9 +36,6 @@
         "regex": "tag/v([\\d.]+)"
     },
     "autoupdate": {
-        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi",
-        "hash": {
-            "mode": "download"
-        }
+        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
     }
 }
