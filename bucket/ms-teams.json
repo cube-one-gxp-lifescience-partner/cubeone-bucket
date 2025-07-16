@@ -4,7 +4,6 @@
     "homepage": "https://www.microsoft.com/microsoft-teams/download-app",
     "license": "Proprietary",
     "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe",
-    "hash": "c8db62bed2305b35860ba601c926f664da5c49cb58db6e364f0ed2805af511f0",
     "installer": {
         "args": ["/S"],
         "keep": true
@@ -15,6 +14,47 @@
         "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu --disable-software-rasterizer', 'User')",
         "New-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -ErrorAction SilentlyContinue",
         "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Teams' -Name 'DisableHardwareAcceleration' -Value 1 -Type DWord -ErrorAction SilentlyContinue",
-        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green"
-    ]
+        "Write-Host 'GPU acceleration disabled - should fix white screen!' -ForegroundColor Green",
+        "# Speichere Installationsdatum für Update-Erkennung",
+        "Set-Content -Path \`$dir\\install-date.txt -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    ],
+    "uninstaller": {
+        "script": [
+            "Write-Host 'Removing Teams...' -ForegroundColor Yellow",
+            "# Versuche Teams über verschiedene Methoden zu deinstallieren",
+            "Get-AppxPackage -Name 'MSTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
+            "Get-AppxPackage -Name 'MicrosoftTeams' | Remove-AppxPackage -ErrorAction SilentlyContinue",
+            "Get-AppxPackage -Name '*Teams*' | Remove-AppxPackage -ErrorAction SilentlyContinue",
+            "# Versuche über Programme und Features",
+            "\`$uninstallString = (Get-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' | Where-Object { \`$_.DisplayName -like '*Teams*' }).UninstallString",
+            "if (\`$uninstallString) {",
+            "    Start-Process -FilePath \`$uninstallString -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction SilentlyContinue",
+            "}",
+            "# Lösche Registry-Einträge",
+            "Remove-Item -Path 'HKCU:\\Software\\Microsoft\\Teams' -Force -Recurse -ErrorAction SilentlyContinue",
+            "# Lösche Umgebungsvariable",
+            "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', \`$null, 'User')",
+            "Write-Host 'Teams deinstalliert!' -ForegroundColor Green"
+        ]
+    },
+    "checkver": {
+        "script": [
+            "# Prüfe auf neue Version durch Herunterladen der Datei",
+            "\`$url = 'https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe'",
+            "\`$tempFile = New-TemporaryFile",
+            "try {",
+            "    Invoke-WebRequest -Uri \`$url -OutFile \`$tempFile -UseBasicParsing",
+            "    \`$version = (Get-ItemProperty \`$tempFile).VersionInfo.ProductVersion",
+            "    if (!\`$version) {",
+            "        \`$version = Get-Date -Format 'yyyy.MM.dd.HHmm'",
+            "    }",
+            "    Write-Output \`$version",
+            "} finally {",
+            "    Remove-Item \`$tempFile -ErrorAction SilentlyContinue",
+            "}"
+        ]
+    },
+    "autoupdate": {
+        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe"
+    }
 }
