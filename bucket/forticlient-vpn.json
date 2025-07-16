@@ -1,9 +1,53 @@
 {
     "version": "1.0.0",
     "description": "FortiClient VPN - SSL VPN client for secure remote access",
-    "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
+    "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.exe",
+    "url": "https://httpbin.org/robots.txt",
+    "pre_install": [
+        "# Lösche die Dummy-Datei",
+        "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
+        "",
+        "# Prüfe GitLab PAT",
+        "if (-not $env:GITLAB_PAT) {",
+        "    throw 'GITLAB_PAT environment variable not set'",
+        "}",
+        "",
+        "Write-Host 'Downloading FortiClient VPN from cube one GitLab API...' -ForegroundColor Blue",
+        "",
+        "# GitLab API Headers",
+        "$headers = @{",
+        "    'Authorization' = \"Bearer $env:GITLAB_PAT\"",
+        "    'User-Agent' = 'cube-one-auto-updater/1.0'",
+        "}",
+        "",
+        "# GitLab API URL",
+        "$apiUrl = 'https://git.cubeone.de/api/v4/projects/marvin.fenssel%2Fauto-updater/repository/files/additional_software%2FFortiClientVPN.exe/raw?ref=main'",
+        "$downloadPath = \"$dir\\FortiClientVPN.exe\"",
+        "",
+        "try {",
+        "    Invoke-WebRequest -Uri $apiUrl -Headers $headers -OutFile $downloadPath -TimeoutSec 30",
+        "    ",
+        "    if (Test-Path $downloadPath) {",
+        "        $fileInfo = Get-Item $downloadPath",
+        "        Write-Host \"Download successful: $($fileInfo.Length) bytes\" -ForegroundColor Green",
+        "        ",
+        "        # Prüfe EXE-Datei (MZ Header)",
+        "        $bytes = [System.IO.File]::ReadAllBytes($downloadPath)",
+        "        if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {",
+        "            Write-Host \"Valid EXE file detected\" -ForegroundColor Green",
+        "        } else {",
+        "            throw 'Downloaded file is not a valid EXE archive'",
+        "        }",
+        "    } else {",
+        "        throw 'Downloaded file not found'",
+        "    }",
+        "} catch {",
+        "    throw \"Failed to download from GitLab API: $($_.Exception.Message)\"",
+        "}",
+        "",
+        "Write-Host 'FortiClient VPN downloaded successfully!' -ForegroundColor Green"
+    ],
     "installer": {
         "script": [
             "Rename-Item -Path \"$dir\\FortiClientVPN.exe\" -NewName \"FortiClientVPN.msi\" -Force",
@@ -23,7 +67,8 @@
         ]
     },
     "post_install": [
-        "Write-Host 'FortiClient VPN installation completed with /passive /norestart!' -ForegroundColor Green",
+        "Write-Host 'FortiClient VPN installation completed from cube one GitLab!' -ForegroundColor Green",
+        "Write-Host 'Source: https://git.cubeone.de/marvin.fenssel/auto-updater' -ForegroundColor Blue",
         "Write-Host 'Note: A reboot may be required for full functionality.' -ForegroundColor Yellow"
     ],
     "uninstaller": {
@@ -50,12 +95,10 @@
             "Write-Host 'FortiClient VPN uninstall completed!' -ForegroundColor Green"
         ]
     },
-    "checkver": {
-        "url": "https://api.github.com/repos/cube-one-gxp-lifescience-partner/cubeone-bucket/releases",
-        "jsonpath": "$[0].tag_name",
-        "regex": "^v?([\\d.]+(?:-[\\w.]+)?)$"
-    },
-    "autoupdate": {
-        "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/$version/FortiClientVPN.exe"
-    }
+    "notes": [
+        "FortiClient VPN from cube one GmbH",
+        "Downloaded from private GitLab repository via API",
+        "Requires GITLAB_PAT environment variable for authentication",
+        "Installs as system-wide MSI package with /passive /norestart"
+    ]
 }
