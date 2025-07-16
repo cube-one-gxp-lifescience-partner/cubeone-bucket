@@ -1,17 +1,29 @@
 {
     "version": "1.5.0",
+    "description": "Quba is a cross-platform viewer for electronic invoices (ZUGFeRD/Factur-X)",
     "license": "Apache-2.0",
-    "url": "https://github.com/ZUGFeRD/quba-viewer/",
+    "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v1.5.0/Quba.1.5.0.msi",
+    "hash": "sha256:auto",
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
-    "checkver": "github",
+    "depends": "lessmsi",
+    "installer": {
+        "script": [
+            "Expand-MsiArchive -Path $dir\\Quba.$version.msi -ExtractDir 'PFiles\\Quba' -Destination $dir",
+            "Remove-Item -Path $dir\\*.msi -Force"
+        ]
+    },
+    "bin": "Quba.exe",
+    "shortcuts": [
+        [
+            "Quba.exe",
+            "Quba Viewer"
+        ]
+    ],
+    "checkver": {
+        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/latest",
+        "regex": "tag/v([\\d.]+)"
+    },
     "autoupdate": {
-        "architecture": {
-            "64bit": {
-                "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
-            },
-            "32bit": {
-                "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
-            }
-        }
+        "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v$version/Quba.$version.msi"
     }
 }
