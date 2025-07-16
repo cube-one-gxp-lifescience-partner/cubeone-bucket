@@ -1,0 +1,22 @@
+{
+    "version": "2503.10",
+    "description": "Citrix Workspace app for Windows with Microsoft Teams optimization",
+    "homepage": "https://www.citrix.com/products/workspace-app/",
+    "license": "Proprietary",
+    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/CitrixWorkspaceApp.exe",
+    "hash": "skip",
+    "installer": {
+        "script": [
+            "Write-Host 'Installing Citrix Workspace 2503.10 with Teams optimization...'",
+            "& \"$dir\\CitrixWorkspaceApp.exe\" /silent /noreboot /installMSTeamsPlugin /REMOVE=Flash",
+            "Write-Host 'Installation completed. Flash Player excluded for security.'"
+        ]
+    },
+    "notes": [
+        "Administrator privileges required",
+        "Microsoft Teams optimization enabled",
+        "Flash Player Plugin explicitly excluded",
+        "Auto-updating application",
+        "May require restart after installation"
+    ]
+}
