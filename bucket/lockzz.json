@@ -1,9 +1,11 @@
 {
     "version": "1.0.0",
-    "description": "lockzz - Verwaltungssoftware",
+    "description": "lockzz - Portable application from cube one",
     "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "Proprietary",
     "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/lockzz.zip",
+    "hash": "skip",
+    "extract_dir": "lockzz",
     "bin": "lockzz.exe",
     "shortcuts": [
         [
@@ -11,9 +13,13 @@
             "lockzz"
         ]
     ],
+    "post_install": [
+        "Write-Host 'lockzz has been installed successfully.'",
+        "Write-Host 'Run \"lockzz\" from command line to start the application.'"
+    ],
     "notes": [
-        "Portable application - no installation required",
-        "Binary available as 'lockzz' command in terminal",
-        "Desktop shortcut created automatically"
+        "Portable application from cube one GmbH",
+        "No installation required - runs directly from extracted folder",
+        "Available as 'lockzz' command in terminal after installation"
     ]
 }
