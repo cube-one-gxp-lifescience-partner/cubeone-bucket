@@ -5,16 +5,14 @@
     "license": "Proprietary",
     "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.msi",
     "installer": {
-        "args": [
-            "/passive",
-            "/norestart"
+        "script": [
+            "Write-Host 'Installing FortiClient VPN...' -ForegroundColor Green",
+            "Start-Process -FilePath 'msiexec' -ArgumentList '/i', $dir\\FortiClientVPN.msi, '/passive', '/norestart' -Wait -NoNewWindow",
+            "Write-Host 'FortiClient VPN installation completed!' -ForegroundColor Green"
         ]
     },
     "post_install": [
-        "Write-Host 'FortiClient VPN installed from cube-one repository!' -ForegroundColor Green",
-        "Write-Host 'Setting up basic registry configuration...' -ForegroundColor Yellow",
-        "New-Item -Path 'HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels' -Force -ErrorAction SilentlyContinue",
-        "Write-Host 'FortiClient VPN ready to use!' -ForegroundColor Green"
+        "Write-Host 'FortiClient VPN installed from cube-one repository!' -ForegroundColor Green"
     ],
     "uninstaller": {
         "script": [
