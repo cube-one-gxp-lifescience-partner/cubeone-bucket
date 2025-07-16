@@ -1,79 +1,55 @@
 {
-    "version": "7.4.3",
+    "version": "1.0.0",
     "description": "FortiClient VPN - SSL VPN client for secure remote access",
-    "homepage": "https://www.fortinet.com/products/endpoint-security/forticlient",
+    "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "Proprietary",
-    "url": "https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller.exe",
+    "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/1.0.0/FortiClientVPN.msi",
     "installer": {
         "args": [
-            "/quiet",
+            "/passive",
             "/norestart"
-        ],
-        "keep": true
+        ]
     },
     "post_install": [
-        "Write-Host 'FortiClient VPN installed successfully!' -ForegroundColor Green"
+        "Write-Host 'FortiClient VPN installed from cube-one repository!' -ForegroundColor Green",
+        "Write-Host 'Setting up basic registry configuration...' -ForegroundColor Yellow",
+        "New-Item -Path 'HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels' -Force -ErrorAction SilentlyContinue",
+        "Write-Host 'FortiClient VPN ready to use!' -ForegroundColor Green"
     ],
     "uninstaller": {
         "script": [
             "Write-Host 'Uninstalling FortiClient VPN...' -ForegroundColor Yellow",
-            "# Versuche über Programme und Features zu deinstallieren",
+            "Get-Process -Name 'FortiClient*' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
+            "Start-Sleep -Seconds 2",
             "$uninstallKeys = @(",
             "    'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',",
             "    'HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
             ")",
             "foreach ($key in $uninstallKeys) {",
             "    Get-ItemProperty -Path $key -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*FortiClient*' } | ForEach-Object {",
-            "        if ($_.UninstallString) {",
-            "            Write-Host \"Found FortiClient: $($_.DisplayName)\" -ForegroundColor Cyan",
-            "            if ($_.UninstallString -like '*msiexec*') {",
-            "                # MSI-Deinstallation",
-            "                $productCode = $_.PSChildName",
-            "                Start-Process -FilePath 'msiexec' -ArgumentList '/x', $productCode, '/quiet', '/norestart' -Wait -NoNewWindow",
-            "            } else {",
-            "                # EXE-Deinstallation",
-            "                $uninstallCmd = $_.UninstallString",
-            "                if ($uninstallCmd -notlike '*quiet*') {",
-            "                    $uninstallCmd += ' /quiet'",
-            "                }",
-            "                if ($uninstallCmd -notlike '*norestart*') {",
-            "                    $uninstallCmd += ' /norestart'",
-            "                }",
-            "                Start-Process -FilePath 'cmd' -ArgumentList '/c', $uninstallCmd -Wait -NoNewWindow",
-            "            }",
+            "        if ($_.UninstallString -like '*msiexec*') {",
+            "            Write-Host \"Uninstalling: $($_.DisplayName)\" -ForegroundColor Cyan",
+            "            $productCode = $_.PSChildName",
+            "            Start-Process -FilePath 'msiexec' -ArgumentList '/x', $productCode, '/quiet', '/norestart', 'REBOOT=ReallySuppress' -Wait -NoNewWindow",
             "        }",
             "    }",
             "}",
+            "Remove-Item -Path 'HKLM:\\SOFTWARE\\Fortinet' -Recurse -Force -ErrorAction SilentlyContinue",
             "Write-Host 'FortiClient VPN uninstalled!' -ForegroundColor Green"
         ]
     },
-    "bin": [
-        "FortiClientVPNInstaller.exe"
+    "bin": "FortiClient.exe",
+    "shortcuts": [
+        [
+            "FortiClient.exe",
+            "FortiClient VPN"
+        ]
     ],
     "checkver": {
-        "script": [
-            "$url = 'https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller.exe'",
-            "$tempFile = New-TemporaryFile",
-            "try {",
-            "    Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing",
-            "    $versionInfo = (Get-ItemProperty $tempFile).VersionInfo",
-            "    $version = $versionInfo.ProductVersion",
-            "    if (!$version -or $version -eq '0.0.0.0') {",
-            "        $version = $versionInfo.FileVersion",
-            "    }",
-            "    if (!$version -or $version -eq '0.0.0.0') {",
-            "        $hash = (Get-FileHash $tempFile -Algorithm SHA256).Hash",
-            "        $version = $hash.Substring(0,8)",
-            "    }",
-            "    Write-Output $version",
-            "} catch {",
-            "    Write-Output (Get-Date -Format 'yyyy.MM.dd.HHmm')",
-            "} finally {",
-            "    Remove-Item $tempFile -ErrorAction SilentlyContinue",
-            "}"
-        ]
+        "github": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
+        "use_latest_release": false
     },
     "autoupdate": {
-        "url": "https://filestore.fortinet.com/forticlient/downloads/FortiClientVPNInstaller_$version.exe"
+        "url": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket/releases/download/$version/FortiClientVPN.msi"
     }
 }
