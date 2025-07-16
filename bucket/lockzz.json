@@ -3,7 +3,7 @@
     "description": "lockzz - Portable application from cube one",
     "homepage": "https://git.cubeone.de/marvin.fenssel/auto-updater",
     "license": "Proprietary",
-    "url": "https://git.cubeone.de/api/v4/projects/marvin.fenssel%2Fauto-updater/repository/files/additional_software%2Flockzz.zip/raw?ref=main",
+    "url": "https://auto-updater:$env:GITLAB_PAT@git.cubeone.de/api/v4/projects/marvin.fenssel%2Fauto-updater/repository/files/additional_software%2Flockzz.zip/raw?ref=main",
     "headers": {
         "Authorization": "Bearer $env:GITLAB_PAT",
         "User-Agent": "cube-one-auto-updater/1.0"
