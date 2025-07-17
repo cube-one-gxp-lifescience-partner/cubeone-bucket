@@ -16,15 +16,15 @@
         "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
         "",
         "# Prüfe Nextcloud App-Passwort",
-        "if (-not $env:NEXTCLOUD_APP_PASSWORD) {",
-        "    throw 'NEXTCLOUD_APP_PASSWORD environment variable not set'",
+        "if (-not $env:NEXTCLOUD_TOKEN) {",
+        "    throw 'NEXTCLOUD_TOKEN environment variable not set'",
         "}",
         "",
         "Write-Host 'Downloading lockzz from cube one Nextcloud...' -ForegroundColor Blue",
         "",
         "# Nextcloud WebDAV Authentication",
         "$userId = 'Auto-Updater'",
-        "$credentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(\"$userId`:$env:NEXTCLOUD_APP_PASSWORD\"))",
+        "$credentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(\"$userId`:$env:NEXTCLOUD_TOKEN\"))",
         "$headers = @{",
         "    'Authorization' = \"Basic $credentials\"",
         "    'User-Agent' = 'cube-one-auto-updater/1.0'",
@@ -108,7 +108,7 @@
     "notes": [
         "Portable application from cube one GmbH",
         "Downloaded from private Nextcloud via WebDAV",
-        "Requires NEXTCLOUD_APP_PASSWORD environment variable for authentication",
+        "Requires NEXTCLOUD_TOKEN environment variable for authentication",
         "Automatically handles subdirectory extraction"
     ]
 }
