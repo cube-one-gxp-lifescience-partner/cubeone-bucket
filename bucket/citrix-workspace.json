@@ -13,7 +13,7 @@
         "    throw 'NEXTCLOUD_TOKEN environment variable not set'",
         "}",
         "",
-        "Write-Host 'Downloading FortiClient VPN from cube one Nextcloud (Optimized)...' -ForegroundColor Blue",
+        "Write-Host 'Downloading Citrox Workspace from cube one Nextcloud (Optimized)...' -ForegroundColor Blue",
         "",
         "# Nextcloud WebDAV Authentication",
         "$userId = 'Auto-Updater'",
