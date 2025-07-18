@@ -134,6 +134,15 @@
             "& \"$dir\\make_me_admin_installer.exe\"",
             "Write-Host 'Installation completed'"
         ]
+    },,
+    "uninstaller": {
+        "script": [
+            "Write-Host 'Uninstalling MAke Me Admin...' -ForegroundColor Yellow",
+            "Remove-Item -Path 'C:\\cubeone\\make_me_admin' -Force -Recurse -ErrorAction SilentlyContinue",
+            "Stop-Service -Name 'MakeMeAdminService'",
+            "Remove-Service -Name 'MakeMeAdminService'",
+            "Write-Host 'Make Me Admin uninstalled!' -ForegroundColor Green"
+        ]
     },
     "notes": [
         "Administrator privileges required"
