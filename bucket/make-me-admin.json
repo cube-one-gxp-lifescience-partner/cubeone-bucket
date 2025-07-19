@@ -134,7 +134,7 @@
             "& \"$dir\\make_me_admin_installer.exe\"",
             "Write-Host 'Installation completed'"
         ]
-    },,
+    },
     "uninstaller": {
         "script": [
             "Write-Host 'Uninstalling MAke Me Admin...' -ForegroundColor Yellow",
