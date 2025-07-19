@@ -10,7 +10,6 @@
             "Write-Host 'Use the MS Teams Setup shortcut to install manually' -ForegroundColor Cyan"
         ]
     },
-    "bin": "MSTeamsSetup.exe",
     "post_install": [
         "Write-Host 'Teams setup ready!' -ForegroundColor Green",
         "Write-Host 'Setting up GPU fix for future installation...' -ForegroundColor Yellow",
@@ -46,31 +45,5 @@
             "[Environment]::SetEnvironmentVariable('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', $null, 'User')",
             "Write-Host 'Teams uninstalled!' -ForegroundColor Green"
         ]
-    },
-    "checkver": {
-        "script": [
-            "$url = 'https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe'",
-            "$tempFile = New-TemporaryFile",
-            "try {",
-            "    Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing",
-            "    $versionInfo = (Get-ItemProperty $tempFile).VersionInfo",
-            "    $version = $versionInfo.ProductVersion",
-            "    if (!$version -or $version -eq '0.0.0.0') {",
-            "        $version = $versionInfo.FileVersion",
-            "    }",
-            "    if (!$version -or $version -eq '0.0.0.0') {",
-            "        $hash = (Get-FileHash $tempFile -Algorithm SHA256).Hash",
-            "        $version = $hash.Substring(0,8)",
-            "    }",
-            "    Write-Output $version",
-            "} catch {",
-            "    Write-Output (Get-Date -Format 'yyyy.MM.dd.HHmm')",
-            "} finally {",
-            "    Remove-Item $tempFile -ErrorAction SilentlyContinue",
-            "}"
-        ]
-    },
-    "autoupdate": {
-        "url": "https://statics.teams.cdn.office.net/evergreen-assets/DesktopClient/MSTeamsSetup.exe"
     }
 }
