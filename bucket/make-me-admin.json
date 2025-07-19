@@ -140,7 +140,7 @@
             "$shortcut.TargetPath = $targetPath",
             "$shortcut.WorkingDirectory = Split-Path $targetPath",
             "$shortcut.Description = 'Admin Elevation Client'",
-            "$shortcut.Save()",
+            "$shortcut.Save()"
         ]
     },
     "uninstaller": {
