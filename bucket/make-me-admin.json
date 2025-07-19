@@ -148,7 +148,7 @@
             "Write-Host 'Uninstalling Make Me Admin...' -ForegroundColor Yellow",
             "Remove-Item -Path 'C:\\cubeone\\make_me_admin' -Force -Recurse -ErrorAction SilentlyContinue",
             "Stop-Service -Name 'MakeMeAdminService'",
-            "Remove-Service -Name 'MakeMeAdminService'",
+            "sc delete MakeMeAdminService",
             "Write-Host 'Make Me Admin uninstalled!' -ForegroundColor Green"
         ]
     },
