@@ -4,6 +4,13 @@
     "homepage": "https://git.cubeone.de/marvin.fenssel/make-me-admin",
     "license": "Proprietary",
     "url": "https://httpbin.org/robots.txt",
+    "bin": "C:\\cubeone\\make_me_admin\\client\\make_me_admin.exe",
+    "shortcuts": [
+        [
+            "C:\\cubeone\\make_me_admin\\client\\make_me_admin.exe",
+            "Make Me Admin"
+        ]
+    ]
     "pre_install": [
         "# Lösche die Dummy-Datei",
         "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
