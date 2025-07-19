@@ -4,13 +4,6 @@
     "homepage": "https://git.cubeone.de/marvin.fenssel/make-me-admin",
     "license": "Proprietary",
     "url": "https://httpbin.org/robots.txt",
-    "bin": "C:\\cubeone\\make_me_admin\\client\\make_me_admin.exe",
-    "shortcuts": [
-        [
-            "C:\\cubeone\\make_me_admin\\client\\make_me_admin.exe",
-            "Make Me Admin"
-        ]
-    ],
     "pre_install": [
         "# Lösche die Dummy-Datei",
         "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
@@ -139,7 +132,15 @@
         "script": [
             "Write-Host 'Installing Make Me Admin...'",
             "& \"$dir\\make_me_admin_installer.exe\"",
-            "Write-Host 'Installation completed'"
+            "Write-Host 'Installation completed'",
+            "$shortcutPath = '$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Scoop Apps\\Make Me Admin.lnk'",
+            "$targetPath = 'C:\\cubeone\\make_me_admin\\client\\make_me_admin.exe'",
+            "$WScriptShell = New-Object -ComObject WScript.Shell",
+            "$shortcut = $WScriptShell.CreateShortcut($shortcutPath)",
+            "$shortcut.TargetPath = $targetPath",
+            "$shortcut.WorkingDirectory = Split-Path $targetPath",
+            "$shortcut.Description = 'Admin Elevation Client'",
+            "$shortcut.Save()",
         ]
     },
     "uninstaller": {
