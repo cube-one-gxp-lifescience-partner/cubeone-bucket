@@ -126,7 +126,7 @@
         "    throw 'Downloaded file not found'",
         "}",
         "",
-        "Write-Host 'FortiClient VPN downloaded successfully!' -ForegroundColor Green"
+        "Write-Host 'Citrix Workspace downloaded successfully!' -ForegroundColor Green"
     ],
     "installer": {
         "script": [
