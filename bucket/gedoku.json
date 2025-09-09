@@ -1,0 +1,19 @@
+{
+    "version": "2.0.0.4",
+    "description": "GEDOKU - Software zur rechtssicheren und effizienten Dokumentation der Gefährdungsbeurteilung (VBG)",
+    "homepage": "https://www.vbg.de/cms/arbeitsschutz/arbeitsschutz-organisieren/gefaehrdungsbeurteilung/gedoku",
+    "license": "Proprietary",
+    "url": "https://gedoku.jedermann.de/updates/Setup-GEDOKU_2.0.0.4.exe",
+    "bin": "Setup-GEDOKU_2.0.0.4.exe",
+    "checkver": {
+        "url": "https://gedoku.jedermann.de/updates/version",
+        "regex": "Programm=https://gedoku\\.jedermann\\.de/updates/Setup-GEDOKU_([\\d.]+)\\.exe"
+    },
+    "autoupdate": {
+        "url": "https://gedoku.jedermann.de/updates/Setup-GEDOKU_$version.exe"
+    },
+    "notes": [
+        "GEDOKU - Risk Assessment Documentation Software",
+        "Developed by Jedermann-Verlag in cooperation with VBG"
+    ]
+}
