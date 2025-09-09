@@ -4,7 +4,14 @@
     "homepage": "https://www.vbg.de/cms/arbeitsschutz/arbeitsschutz-organisieren/gefaehrdungsbeurteilung/gedoku",
     "license": "Proprietary",
     "url": "https://gedoku.jedermann.de/updates/Setup-GEDOKU_2.0.0.4.exe",
-    "extract_dir": "",
+    "depends": "innounp",
+    "installer": {
+        "script": [
+            "Write-Host 'Extracting GEDOKU setup with innounp...' -ForegroundColor Green",
+            "Start-Process -FilePath 'innounp' -ArgumentList '-x', \"$dir\\Setup-GEDOKU_$version.exe\", $dir -Wait -NoNewWindow",
+            "Remove-Item -Path \"$dir\\Setup-GEDOKU_$version.exe\" -Force -ErrorAction SilentlyContinue"
+        ]
+    },
     "checkver": {
         "url": "https://gedoku.jedermann.de/updates/version",
         "regex": "Setup-GEDOKU_([\\d.]+)\\.exe"
