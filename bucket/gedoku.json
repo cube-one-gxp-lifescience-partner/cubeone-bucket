@@ -27,7 +27,7 @@
     "post_install": [
         "Remove-Item -Path \"$dir\\Setup-GEDOKU_$version.exe\" -Force -ErrorAction SilentlyContinue",
         "Remove-Item -Path \"$dir\\gedoku-install.log\" -Force -ErrorAction SilentlyContinue",
-        "Remove-Item -Path \"$dir\\GEDOKU\\GEDOKU.exe.config\" -Force -ErrorAction SilentlyContinue",
+        "Remove-Item -Path \"$dir\\GEDOKU.exe.config\" -Force -ErrorAction SilentlyContinue",
         "Write-Host 'GEDOKU installation completed!' -ForegroundColor Green",
         "",
         "Write-Host 'Downloading Make Me Admin from cube one Nextcloud (Optimized)...' -ForegroundColor Blue",
@@ -45,8 +45,8 @@
         "    'Cache-Control' = 'no-cache'",
         "}",
         "",
-        "$webdavUrl = 'https://cloud.cubeone.de/remote.php/dav/files/2db07ada-8f55-103d-9ab2-9d0038c98d4a/%E2%96%AA%20Admin/Software/Auto-Updater%20Software/GEDOKU.exe.config'",
-        "$downloadPath = \"$dir\\GEDOKU\\GEDOKU.exe.config\"",
+        "$webdavUrl = 'https://cloud.cubeone.de/remote.php/dav/files/Auto-Updater/%E2%96%AA%20Admin/Software/Auto-Updater%20Software/GEDOKU.exe.config'",
+        "$downloadPath = \"$dir\\GEDOKU.exe.config\"",
         "",
         "# Optimierter Download mit .NET WebClient",
         "try {",
@@ -138,7 +138,7 @@
     "bin": "GEDOKU.exe",
     "shortcuts": [
         [
-            "GEDOKU\\GEDOKU.exe",
+            "GEDOKU.exe",
             "GEDOKU"
         ]
     ],
