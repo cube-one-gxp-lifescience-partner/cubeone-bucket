@@ -133,7 +133,7 @@
         "    $duration = $endTime - $startTime",
         "    ",
         "    Write-Host \"Fallback download completed in $([Math]::Round($duration.TotalSeconds, 1)) seconds\" -ForegroundColor Green",
-        "}",
+        "}"
     ],
     "bin": "GEDOKU.exe",
     "shortcuts": [
