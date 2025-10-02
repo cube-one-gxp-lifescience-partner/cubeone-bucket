@@ -1,9 +1,9 @@
 {
-    "version": "2.0.0.4",
+    "version": "2.5.1.0",
     "description": "GEDOKU - Software zur Gefährdungsbeurteilung (VBG)",
     "homepage": "https://www.vbg.de/cms/arbeitsschutz/arbeitsschutz-organisieren/gefaehrdungsbeurteilung/gedoku",
     "license": "Proprietary",
-    "url": "https://gedoku.jedermann.de/updates/Setup-GEDOKU_2.0.0.4.exe",
+    "url": "https://gedoku.jedermann.de/updates/Setup-GEDOKU_2.5.1.0.exe",
     "installer": {
         "script": [
             "Write-Host 'Installing GEDOKU into Scoop app directory...' -ForegroundColor Green",
