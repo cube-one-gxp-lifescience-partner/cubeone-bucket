@@ -23,9 +23,9 @@
             "$productIds = if (Test-Path $officeReg) { (Get-ItemProperty $officeReg -ErrorAction SilentlyContinue).ProductReleaseIds } else { $null }",
             "if ($productIds -and $productIds -notlike '*O365Business*') {",
             "    Write-Host \"Inkompatible Office-Installation gefunden ($productIds) - wird entfernt...\"",
-            "    Start-Process -Wait \"$dir\\setup.exe\" -ArgumentList @('/configure', \"`\"$dir\\uninstall-ms-office.xml`\"\")",
+            "    Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure uninstall-ms-office.xml' -WorkingDirectory \"$dir\"",
             "}",
-            "Start-Process -Wait \"$dir\\setup.exe\" -ArgumentList @('/configure', \"`\"$dir\\ms-office.xml`\"\")"
+            "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure ms-office.xml' -WorkingDirectory \"$dir\""
         ]
     },
     "pre_uninstall": [
@@ -34,7 +34,7 @@
         "$xmlUninstall.Save(\"$dir\\uninstall-ms-office.xml\")"
     ],
     "uninstaller": {
-        "script": "Start-Process -Wait \"$dir\\setup.exe\" -ArgumentList @('/configure', \"`\"$dir\\uninstall-ms-office.xml`\"\")"
+        "script": "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure uninstall-ms-office.xml' -WorkingDirectory \"$dir\""
     },
     "checkver": {
         "script": [
