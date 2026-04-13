@@ -12,29 +12,34 @@
     "installer": {
         "script": [
             "Start-Process -Wait 7z1900-helper -ArgumentList @('x', '-bso0', \"`\"$dir\\dl.7z_`\"\", \"`\"-o$dir`\"\")",
+            "$shortDir = [System.IO.Path]::GetShortPathName($dir)",
             "$client = if ($architecture -eq '32bit') { '32' } else { '64' }",
             "$xmlInstall = New-Object System.Xml.XmlDocument",
             "$xmlInstall.LoadXml(\"<Configuration><Add OfficeClientEdition='$client'><Product ID='O365BusinessRetail'><Language ID='MatchOS' /></Product></Add><Updates Enabled='TRUE' /><Display Level='None' AcceptEULA='TRUE' /><Logging Path='%TEMP%' /></Configuration>\")",
-            "$xmlInstall.Save(\"$dir\\ms-office.xml\")",
+            "$xmlInstall.Save(\"$shortDir\\ms-office.xml\")",
             "$xmlUninstall = New-Object System.Xml.XmlDocument",
             "$xmlUninstall.LoadXml(\"<Configuration><Display Level='None' /><Logging Path='%TEMP%' /><Remove All='TRUE' /></Configuration>\")",
-            "$xmlUninstall.Save(\"$dir\\uninstall-ms-office.xml\")",
+            "$xmlUninstall.Save(\"$shortDir\\uninstall-ms-office.xml\")",
             "$officeReg = 'HKLM:\\SOFTWARE\\Microsoft\\Office\\ClickToRun\\Configuration'",
             "$productIds = if (Test-Path $officeReg) { (Get-ItemProperty $officeReg -ErrorAction SilentlyContinue).ProductReleaseIds } else { $null }",
             "if ($productIds -and $productIds -notlike '*O365Business*') {",
             "    Write-Host \"Inkompatible Office-Installation gefunden ($productIds) - wird entfernt...\"",
-            "    Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure uninstall-ms-office.xml' -WorkingDirectory \"$dir\"",
+            "    Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList \"/configure `\"$shortDir\\uninstall-ms-office.xml`\"\"",
             "}",
-            "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure ms-office.xml' -WorkingDirectory \"$dir\""
+            "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList \"/configure `\"$shortDir\\ms-office.xml`\"\""
         ]
     },
     "pre_uninstall": [
+        "$shortDir = [System.IO.Path]::GetShortPathName($dir)",
         "$xmlUninstall = New-Object System.Xml.XmlDocument",
         "$xmlUninstall.LoadXml(\"<Configuration><Display Level='None' /><Logging Path='%TEMP%' /><Remove All='TRUE' /></Configuration>\")",
-        "$xmlUninstall.Save(\"$dir\\uninstall-ms-office.xml\")"
+        "$xmlUninstall.Save(\"$shortDir\\uninstall-ms-office.xml\")"
     ],
     "uninstaller": {
-        "script": "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/configure uninstall-ms-office.xml' -WorkingDirectory \"$dir\""
+        "script": [
+            "$shortDir = [System.IO.Path]::GetShortPathName($dir)",
+            "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList \"/configure `\"$shortDir\\uninstall-ms-office.xml`\"\""
+        ]
     },
     "checkver": {
         "script": [
