@@ -4,5 +4,5 @@
             <Language ID="MatchOS" />
         </Product>
     </Add>
-    <Display Level="None" AcceptEULA="TRUE" />
+    <Display AcceptEULA="TRUE" />
 </Configuration>
