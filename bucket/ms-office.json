@@ -14,7 +14,7 @@
             "Start-Process -Wait 7z1900-helper -ArgumentList @('x', '-bso0', \"`\"$dir\\dl.7z_`\"\", \"`\"-o$dir`\"\")",
             "$client = if ($architecture -eq '32bit') { '32' } else { '64' }",
             "$utf8NoBom = New-Object System.Text.UTF8Encoding $false",
-            "$installXml = '<Configuration><Add OfficeClientEdition=\"' + $client + '\" Channel=\"Current\"><Product ID=\"O365BusinessRetail\"><Language ID=\"MatchOS\" /></Product></Add><Display Level=\"None\" AcceptEULA=\"TRUE\" /></Configuration>'",
+            "$installXml = '<Configuration><Add OfficeClientEdition=\"' + $client + '\" Channel=\"Current\"><Product ID=\"O365BusinessRetail\"><Language ID=\"MatchOS\" /></Product></Add><Display Level=\"Basic\" AcceptEULA=\"TRUE\" /></Configuration>'",
             "[System.IO.File]::WriteAllText(\"$dir\\ms-office.xml\", $installXml, $utf8NoBom)",
             "$uninstallXml = '<Configuration><Remove All=\"TRUE\" /><Display Level=\"None\" AcceptEULA=\"TRUE\" /></Configuration>'",
             "[System.IO.File]::WriteAllText(\"$dir\\uninstall-ms-office.xml\", $uninstallXml, $utf8NoBom)",
