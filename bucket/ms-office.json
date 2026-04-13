@@ -1,5 +1,5 @@
 {
-    "version": "16.0.19725.20126",
+    "version": "16.0.19725.20170",
     "description": "Family of client software, server software and services developed by Microsoft.",
     "homepage": "https://www.office.com/",
     "license": {
@@ -28,7 +28,19 @@
             "    $p.WaitForExit()",
             "}",
             "$p = Start-Process -PassThru -Verb RunAs -FilePath 'cmd.exe' -ArgumentList \"/c `\"$dir\\install-office.bat`\"\"",
-            "$p.WaitForExit()"
+            "$p.WaitForExit()",
+            "New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'OneDrive' -Value '\"%LOCALAPPDATA%\\Microsoft\\OneDrive\\OneDrive.exe\" /background' -PropertyType String -Force | Out-Null",
+            "$odPolicyPath = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\OneDrive'",
+            "New-Item -Path $odPolicyPath -Force | Out-Null",
+            "New-ItemProperty -Path $odPolicyPath -Name 'KFMSilentOptIn' -Value '4eeeffad-35f0-4ce5-b7d4-1aa5693e50ce' -PropertyType String -Force | Out-Null",
+            "New-ItemProperty -Path $odPolicyPath -Name 'KFMSilentOptInWithNotification' -Value 1 -PropertyType DWord -Force | Out-Null",
+            "New-ItemProperty -Path $odPolicyPath -Name 'KFMSilentOptInDesktop' -Value 1 -PropertyType DWord -Force | Out-Null",
+            "New-ItemProperty -Path $odPolicyPath -Name 'KFMSilentOptInDocuments' -Value 1 -PropertyType DWord -Force | Out-Null",
+            "New-ItemProperty -Path $odPolicyPath -Name 'KFMSilentOptInPictures' -Value 1 -PropertyType DWord -Force | Out-Null",
+            "$tenantMountPath = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\OneDrive\\TenantAutoMount'",
+            "New-Item -Path $tenantMountPath -Force | Out-Null",
+            "$libraryId = 'tenantId=4eeeffad%2D35f0%2D4ce5%2Db7d4%2D1aa5693e50ce&siteId=%7B087c95da%2D4184%2D4e10%2D8ffb%2D3f75bff0d621%7D&webId=%7Bfd09b123%2D2ddb%2D4821%2D8f4d%2D483d2178efd4%7D&listId=fd3d62b9%2D38bc%2D4d2d%2D8fb8%2D23e2efcc1c49&webUrl=https%3A%2F%2Fcubeonegxp%2Esharepoint%2Ecom&version=1'",
+            "New-ItemProperty -Path $tenantMountPath -Name 'SharePointSiteName' -Value $libraryId -PropertyType String -Force | Out-Null"
         ]
     },
     "pre_uninstall": [
