@@ -3,7 +3,8 @@
     "description": "CubeCurrencyConverter - Currency converter from cube one",
     "homepage": "https://cubeone.de",
     "license": "Proprietary",
-    "url": "https://httpbin.org/robots.txt",
+    "url": "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/LICENSE",
+    "hash": "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e",
     "bin": "CubeCurrencyConverter.exe",
     "shortcuts": [
         [
@@ -12,7 +13,7 @@
         ]
     ],
     "pre_install": [
-        "Remove-Item \"$dir\\robots.txt\" -ErrorAction SilentlyContinue",
+        "Remove-Item \"$dir\\LICENSE\" -ErrorAction SilentlyContinue",
         "",
         "if (-not $env:AUTO_UPDATER_API_KEY) {",
         "    throw 'AUTO_UPDATER_API_KEY environment variable not set'",
