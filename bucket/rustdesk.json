@@ -1,0 +1,182 @@
+{
+    "version": "1.4.9",
+    "description": "RustDesk remote desktop with cube one self-hosted server configuration and Windows service",
+    "homepage": "https://github.com/rustdesk/rustdesk",
+    "license": "AGPL-3.0-only",
+    "notes": [
+        "Administrator privileges required",
+        "Requires RUSTDESK_SETUP_KEY environment variable (Export Server Config string)",
+        "Installs to Program Files with Windows service to avoid portable UAC/elevation issues",
+        "Existing device ID and permanent password in %APPDATA%\\RustDesk are preserved on install and update",
+        "Uninstall other RustDesk Scoop packages (e.g. extras/rustdesk) before installing this manifest"
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/rustdesk/rustdesk/releases/download/1.4.9/rustdesk-1.4.9-x86_64.exe#/rustdesk-installer.exe",
+            "hash": "eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"
+        },
+        "32bit": {
+            "url": "https://github.com/rustdesk/rustdesk/releases/download/1.4.9/rustdesk-1.4.9-x86-sciter.exe#/rustdesk-installer.exe",
+            "hash": "28e89fc56598978799b87b3d177464a112da174fceb61512919c514a7e90ea20"
+        }
+    },
+    "pre_install": [
+        "Write-Host 'Stopping RustDesk before install or update...' -ForegroundColor Yellow",
+        "Stop-Service -Name 'RustDesk' -Force -ErrorAction SilentlyContinue",
+        "Get-Process -Name 'RustDesk' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
+        "Start-Sleep -Seconds 2"
+    ],
+    "installer": {
+        "script": [
+            "$installerPath = \"$dir\\rustdesk-installer.exe\"",
+            "if (-not (Test-Path $installerPath)) {",
+            "    throw 'RustDesk installer not found'",
+            "}",
+            "",
+            "$rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\rustdesk.exe'",
+            "if (-not (Test-Path $rustDeskExe)) {",
+            "    $rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\RustDesk.exe'",
+            "}",
+            "",
+            "$needsInstall = $true",
+            "if (Test-Path $rustDeskExe) {",
+            "    $installedVersion = (& $rustDeskExe --version 2>&1 | Select-Object -Last 1).ToString().Trim()",
+            "    if ($installedVersion -eq $version) {",
+            "        Write-Host \"RustDesk $version is already installed in Program Files; skipping silent-install.\" -ForegroundColor Cyan",
+            "        $needsInstall = $false",
+            "    } else {",
+            "        Write-Host \"Upgrading RustDesk from $installedVersion to $version...\" -ForegroundColor Blue",
+            "    }",
+            "}",
+            "",
+            "if ($needsInstall) {",
+            "    Write-Host 'Installing RustDesk to Program Files (silent, elevated)...' -ForegroundColor Green",
+            "    $process = Start-Process -FilePath $installerPath -ArgumentList '--silent-install' -Verb RunAs -Wait -PassThru",
+            "    if ($null -eq $process) {",
+            "        throw 'RustDesk silent install was not started (admin approval may have been denied)'",
+            "    }",
+            "    if ($process.ExitCode -ne 0) {",
+            "        throw \"RustDesk silent install failed with exit code $($process.ExitCode)\"",
+            "    }",
+            "    Start-Sleep -Seconds 10",
+            "}",
+            "",
+            "if (-not (Test-Path $rustDeskExe)) {",
+            "    throw 'RustDesk executable not found after installation'",
+            "}",
+            "",
+            "$launcherPath = \"$dir\\rustdesk.cmd\"",
+            "$launcherLines = @('@echo off', ('\"' + $rustDeskExe + '\" %*'))",
+            "Set-Content -Path $launcherPath -Value ($launcherLines -join [Environment]::NewLine) -Encoding ASCII"
+        ]
+    },
+    "post_install": [
+        "$rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\rustdesk.exe'",
+        "if (-not (Test-Path $rustDeskExe)) {",
+        "    $rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\RustDesk.exe'",
+        "}",
+        "if (-not (Test-Path $rustDeskExe)) {",
+        "    throw 'RustDesk executable not found after installation'",
+        "}",
+        "",
+        "if (-not $env:RUSTDESK_SETUP_KEY) {",
+        "    $env:RUSTDESK_SETUP_KEY = [Environment]::GetEnvironmentVariable('RUSTDESK_SETUP_KEY', 'User')",
+        "}",
+        "if (-not $env:RUSTDESK_SETUP_KEY) {",
+        "    $env:RUSTDESK_SETUP_KEY = [Environment]::GetEnvironmentVariable('RUSTDESK_SETUP_KEY', 'Machine')",
+        "}",
+        "",
+        "$configPath = Join-Path $env:APPDATA 'RustDesk\\config\\RustDesk2.toml'",
+        "if ($env:RUSTDESK_SETUP_KEY) {",
+        "    Write-Host 'Applying self-hosted server configuration from RUSTDESK_SETUP_KEY...' -ForegroundColor Blue",
+        "    $configProcess = Start-Process -FilePath $rustDeskExe -ArgumentList '--config', $env:RUSTDESK_SETUP_KEY -Wait -PassThru -NoNewWindow",
+        "    if ($configProcess.ExitCode -ne 0) {",
+        "        throw \"RustDesk --config failed with exit code $($configProcess.ExitCode)\"",
+        "    }",
+        "} elseif ((Test-Path $configPath) -and (Select-String -Path $configPath -Pattern 'custom-rendezvous-server' -Quiet)) {",
+        "    Write-Host 'RUSTDESK_SETUP_KEY not set; keeping existing server configuration.' -ForegroundColor Yellow",
+        "} else {",
+        "    throw 'RUSTDESK_SETUP_KEY environment variable not set and no existing server configuration found'",
+        "}",
+        "",
+        "$service = Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue",
+        "if (-not $service) {",
+        "    Write-Host 'Installing RustDesk Windows service...' -ForegroundColor Blue",
+        "    $serviceProcess = Start-Process -FilePath $rustDeskExe -ArgumentList '--install-service' -Verb RunAs -Wait -PassThru",
+        "    if ($null -eq $serviceProcess) {",
+        "        throw 'RustDesk --install-service was not started (admin approval may have been denied)'",
+        "    }",
+        "    if ($serviceProcess.ExitCode -ne 0) {",
+        "        throw \"RustDesk --install-service failed with exit code $($serviceProcess.ExitCode)\"",
+        "    }",
+        "    Start-Sleep -Seconds 10",
+        "    $service = Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue",
+        "}",
+        "",
+        "if (-not $service) {",
+        "    throw 'RustDesk Windows service not found after installation'",
+        "}",
+        "",
+        "try {",
+        "    Set-Service -Name 'RustDesk' -StartupType Automatic -ErrorAction Stop",
+        "} catch {",
+        "    Write-Warning \"Could not set RustDesk service startup type: $($_.Exception.Message)\"",
+        "}",
+        "if ($service.Status -ne 'Running') {",
+        "    try {",
+        "        Start-Service -Name 'RustDesk' -ErrorAction Stop",
+        "    } catch {",
+        "        Write-Warning \"Could not start RustDesk service: $($_.Exception.Message)\"",
+        "    }",
+        "}",
+        "",
+        "$rustDeskId = & $rustDeskExe --get-id 2>&1 | Select-Object -Last 1",
+        "Write-Host \"RustDesk ID: $rustDeskId (permanent password preserved)\" -ForegroundColor Green",
+        "",
+        "Remove-Item \"$dir\\rustdesk-installer.exe\" -Force -ErrorAction SilentlyContinue",
+        "Write-Host 'RustDesk service is running with automatic startup.' -ForegroundColor Green"
+    ],
+    "bin": "rustdesk.cmd",
+    "shortcuts": [
+        [
+            "rustdesk.cmd",
+            "RustDesk"
+        ]
+    ],
+    "pre_uninstall": [
+        "Stop-Service -Name 'RustDesk' -Force -ErrorAction SilentlyContinue",
+        "Get-Process -Name 'RustDesk' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
+        "Start-Sleep -Seconds 2"
+    ],
+    "uninstaller": {
+        "script": [
+            "$rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\rustdesk.exe'",
+            "if (-not (Test-Path $rustDeskExe)) {",
+            "    $rustDeskExe = Join-Path $env:ProgramFiles 'RustDesk\\RustDesk.exe'",
+            "}",
+            "",
+            "if (Test-Path $rustDeskExe) {",
+            "    Write-Host 'Uninstalling RustDesk from Program Files...' -ForegroundColor Yellow",
+            "    $process = Start-Process -FilePath $rustDeskExe -ArgumentList '--uninstall' -Wait -PassThru -NoNewWindow",
+            "    if ($process.ExitCode -ne 0) {",
+            "        Write-Warning \"RustDesk --uninstall returned exit code $($process.ExitCode)\"",
+            "    }",
+            "} else {",
+            "    Write-Host 'RustDesk executable not found; skipping Program Files uninstall.' -ForegroundColor Yellow",
+            "}",
+            "",
+            "Write-Host 'RustDesk uninstall completed. User configuration in %APPDATA%\\RustDesk was preserved.' -ForegroundColor Green"
+        ]
+    },
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/rustdesk/rustdesk/releases/download/$version/rustdesk-$version-x86_64.exe#/rustdesk-installer.exe"
+            },
+            "32bit": {
+                "url": "https://github.com/rustdesk/rustdesk/releases/download/$version/rustdesk-$version-x86-sciter.exe#/rustdesk-installer.exe"
+            }
+        }
+    }
+}
