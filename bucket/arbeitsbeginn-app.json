@@ -1,0 +1,69 @@
+{
+    "version": "1.0.0",
+    "description": "ArbeitsbeginnApp - Work start application from cube one",
+    "homepage": "https://cubeone.de",
+    "license": "Proprietary",
+    "url": "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/LICENSE",
+    "hash": "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e",
+    "bin": "ArbeitsbeginnApp.exe",
+    "shortcuts": [
+        [
+            "ArbeitsbeginnApp.exe",
+            "ArbeitsbeginnApp"
+        ]
+    ],
+    "pre_install": [
+        "Remove-Item \"$dir\\LICENSE\" -ErrorAction SilentlyContinue",
+        "",
+        "if (-not $env:AUTO_UPDATER_API_KEY) {",
+        "    throw 'AUTO_UPDATER_API_KEY environment variable not set'",
+        "}",
+        "",
+        "Write-Host 'Downloading ArbeitsbeginnApp from cube one update server...' -ForegroundColor Blue",
+        "",
+        "$headers = @{",
+        "    'X-API-Key' = $env:AUTO_UPDATER_API_KEY",
+        "    'User-Agent' = 'cube-one-auto-updater/1.0'",
+        "}",
+        "",
+        "$downloadUrl = 'https://update.cubeone.de/files/f6450120-cc74-46dc-b587-3a7b0c074f4b'",
+        "$downloadPath = \"$cachedir\\ArbeitsbeginnApp.exe\"",
+        "",
+        "try {",
+        "    Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $downloadPath -TimeoutSec 60",
+        "",
+        "    if (-not (Test-Path $downloadPath)) {",
+        "        throw 'Downloaded file not found'",
+        "    }",
+        "",
+        "    $fileInfo = Get-Item $downloadPath",
+        "    Write-Host \"Download successful: $($fileInfo.Length) bytes\" -ForegroundColor Green",
+        "",
+        "    $expectedHash = '6B041384870649469EEB67B41FE38ED921735205758D3E35504F0890A5CF3995'",
+        "    $actualHash = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash",
+        "    if ($actualHash -ne $expectedHash) {",
+        "        throw \"SHA256 hash mismatch for ArbeitsbeginnApp.exe. Expected: $expectedHash, Actual: $actualHash\"",
+        "    }",
+        "    Write-Host 'SHA256 hash verified for ArbeitsbeginnApp.exe' -ForegroundColor Green",
+        "",
+        "    Copy-Item -Path $downloadPath -Destination \"$dir\\ArbeitsbeginnApp.exe\" -Force",
+        "} catch {",
+        "    throw \"Failed to download ArbeitsbeginnApp: $($_.Exception.Message)\"",
+        "}",
+        "",
+        "Remove-Item $downloadPath -ErrorAction SilentlyContinue"
+    ],
+    "post_install": [
+        "if (-not (Test-Path \"$dir\\ArbeitsbeginnApp.exe\")) {",
+        "    throw 'ArbeitsbeginnApp.exe not found'",
+        "}",
+        "",
+        "Write-Host 'ArbeitsbeginnApp installed successfully!' -ForegroundColor Green"
+    ],
+    "notes": [
+        "Portable application from cube one GmbH",
+        "Downloaded from update.cubeone.de",
+        "Requires AUTO_UPDATER_API_KEY environment variable for authentication",
+        "SHA256 hash verified for ArbeitsbeginnApp.exe after download"
+    ]
+}
