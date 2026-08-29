@@ -1,5 +1,5 @@
 {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "SSH configuration and private key for cube one coding VMs",
     "homepage": "https://cubeone.de",
     "license": "Proprietary",
@@ -17,8 +17,8 @@
             "$keyPath = Join-Path $sshDirectory 'id-coding-vm'",
             "$downloadPath = Join-Path $cachedir 'id-coding-vm'",
             "$configPath = Join-Path $sshDirectory 'config'",
-            "$downloadUrl = 'https://update.cubeone.de/files/bb0bf9b2-420a-45fb-b4bd-d994d1d59363'",
-            "$expectedHash = 'D344047DD9F7D33609C3A3D27488EC2F2EBAADC03D431F0EFD441F307C55B6BD'",
+            "$downloadUrl = 'https://update.cubeone.de/files/c604d6a4-9be2-4251-9010-bd0b53c5c4c5'",
+            "$expectedHash = '176E122F24ECB7FA48D7887CB1D6BCA3C862F2B79C1D604982F148F2C8059454'",
             "$headers = @{",
             "    'X-API-Key' = $env:AUTO_UPDATER_API_KEY",
             "    'User-Agent' = 'cube-one-auto-updater/1.0'",
