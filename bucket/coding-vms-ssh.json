@@ -84,7 +84,7 @@
             "$downloadUrl = 'https://update.cubeone.de/files/c604d6a4-9be2-4251-9010-bd0b53c5c4c5'",
             "# Used only when the server does not send x-sha256. A published key change is",
             "# accepted from that header, so the manifest does not need a new hash.",
-            "$fallbackHash = '176E122F24ECB7FA48D7887CB1D6BCA3C862F2B79C1D604982F148F2C8059454'",
+            "$fallbackHash = '66085F07039E1A227AF474B52F26977C6819EF1B456BAADAE15EC4C2CC3D5892'",
             "$headers = @{",
             "    'X-API-Key' = $env:AUTO_UPDATER_API_KEY",
             "    'User-Agent' = 'cube-one-auto-updater/1.0'",
