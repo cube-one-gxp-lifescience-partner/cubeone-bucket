@@ -1,5 +1,5 @@
 {
-    "version": "1.5.0.1",
+    "version": "1.5.0",
     "description": "RustDesk remote desktop with cube one self-hosted server configuration and Windows service",
     "homepage": "https://github.com/rustdesk/rustdesk",
     "license": "AGPL-3.0-only",
