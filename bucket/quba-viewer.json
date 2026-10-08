@@ -1,8 +1,8 @@
 {
-    "version": "1.5.0",
+    "version": "1.5.1",
     "description": "Quba is a cross-platform viewer for electronic invoices (ZUGFeRD/Factur-X)",
     "license": "Apache-2.0",
-    "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v1.5.0/Quba.1.5.0.msi",
+    "url": "https://github.com/ZUGFeRD/quba-viewer/releases/download/v1.5.1/Quba.1.5.1.msi",
     "homepage": "https://github.com/ZUGFeRD/quba-viewer",
     "installer": {
         "script": [
