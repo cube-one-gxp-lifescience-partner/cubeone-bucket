@@ -4,5 +4,6 @@
             <Language ID="MatchOS" />
         </Product>
     </Add>
-    <Display Level="Basic" AcceptEULA="TRUE" />
+    <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+    <Display Level="None" AcceptEULA="TRUE" />
 </Configuration>
