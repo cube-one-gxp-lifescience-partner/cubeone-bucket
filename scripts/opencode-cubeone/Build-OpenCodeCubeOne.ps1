@@ -26,6 +26,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'managed') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $root 'user') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $root 'Install-OpenCodeCubeOne.ps1') -Destination $staging
+    Copy-Item -LiteralPath (Join-Path $root 'Install-OpenCodeRemote.ps1') -Destination $staging
     $plugin = Join-Path $staging 'plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $plugin 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\package.json') -Destination $plugin

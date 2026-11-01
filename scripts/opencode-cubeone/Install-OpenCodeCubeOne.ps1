@@ -312,7 +312,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -351,4 +351,9 @@ $apiKey = @(
 ) | Where-Object { $_ } | Select-Object -First 1
 if (-not $apiKey) {
     Write-Warning 'OPENROUTER_API_KEY is not set. OpenCode shows no models and dictation fails until it is set for the user.'
+}
+
+$remoteScript = Join-Path $SourceDir 'Install-OpenCodeRemote.ps1'
+if (Test-Path -LiteralPath $remoteScript) {
+    & $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
 }
