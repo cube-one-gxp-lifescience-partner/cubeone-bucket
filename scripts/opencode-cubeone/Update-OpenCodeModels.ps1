@@ -108,6 +108,8 @@ $config = [ordered]@{
         [ordered]@{ action = 'integration.connect'; resource = '*'; effect = 'deny' }
         [ordered]@{ action = 'integration.use'; resource = '*'; effect = 'deny' }
         [ordered]@{ action = 'integration.use'; resource = $ProviderId; effect = 'allow' }
+        # OpenCode registers every remote MCP server with OAuth as integration mcp_<sha1>.
+        [ordered]@{ action = 'integration.use'; resource = 'mcp_*'; effect = 'allow' }
     )
     instructions = @(
         'C:/ProgramData/opencode/rules/*.md'

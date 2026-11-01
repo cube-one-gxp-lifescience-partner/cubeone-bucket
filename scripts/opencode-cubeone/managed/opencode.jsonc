@@ -546,6 +546,11 @@
       "action": "integration.use",
       "resource": "openrouter-zdr",
       "effect": "allow"
+    },
+    {
+      "action": "integration.use",
+      "resource": "mcp_*",
+      "effect": "allow"
     }
   ],
   "instructions": [
