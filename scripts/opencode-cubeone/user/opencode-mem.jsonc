@@ -1,0 +1,14 @@
+{
+  // Local memory for OpenCode. Created once; later edits on the machine are kept.
+  // Capture uses the managed OpenRouter provider, so it stays on Zero Data Retention.
+  // Embeddings run on this machine. The web view binds to loopback only.
+  "webServerHost": "127.0.0.1",
+  "opencodeProvider": "openrouter-zdr",
+  "opencodeModel": "anthropic/claude-haiku-5.5",
+  "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+  "embeddingIdleTimeoutMs": 600000,
+  "chatMessage": {
+    "captureChildSessions": false,
+    "filterInjectedPrompts": true
+  }
+}

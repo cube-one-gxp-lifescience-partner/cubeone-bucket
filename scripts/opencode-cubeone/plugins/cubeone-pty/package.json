@@ -1,0 +1,12 @@
+{
+  "name": "cubeone-pty",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "dependencies": {
+    "opencode-pty": "0.4.0"
+  }
+}

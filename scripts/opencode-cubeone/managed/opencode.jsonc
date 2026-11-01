@@ -892,6 +892,16 @@
           "orchestrator"
         ]
       }
-    }
+    },
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-pty",
+      "options": {
+        "hostname": "127.0.0.1",
+        "port": 0,
+        "autostart": false
+      }
+    },
+    "@tarquinen/opencode-dcp@3.2.0",
+    "opencode-mem@2.39.0"
   ]
 }

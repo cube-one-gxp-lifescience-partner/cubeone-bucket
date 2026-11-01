@@ -278,10 +278,17 @@ function Install-UserConfiguration {
             Write-Host "Optional rule added: $destination" -ForegroundColor Green
         }
     }
+
+    $memorySource = Join-Path $Source 'opencode-mem.jsonc'
+    $memoryTarget = Join-Path $configDir 'opencode-mem.jsonc'
+    if ((Test-Path -LiteralPath $memorySource) -and -not (Test-Path -LiteralPath $memoryTarget)) {
+        Copy-Item -LiteralPath $memorySource -Destination $memoryTarget
+        Write-Host "Local memory settings written to $memoryTarget" -ForegroundColor Green
+    }
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'user\opencode.jsonc')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'user\opencode.jsonc', 'user\opencode-mem.jsonc')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -297,6 +304,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\package.json') -Destination $pluginTarget
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $pluginTarget 'dist')
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-pty') -Destination (Join-Path $staging 'cubeone\plugins\cubeone-pty') -Recurse
 
     Install-ManagedConfiguration -Staging $staging -Target (Join-Path $env:ProgramData 'opencode')
 } finally {

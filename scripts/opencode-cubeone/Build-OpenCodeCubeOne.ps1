@@ -31,6 +31,14 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\package.json') -Destination $plugin
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $plugin 'dist')
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $plugin 'dist')
+    $ptySource = Join-Path $root 'plugins\cubeone-pty'
+    if (-not (Test-Path -LiteralPath (Join-Path $ptySource 'node_modules\opencode-pty'))) {
+        & npm.cmd install --omit=dev --prefix $ptySource
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm install in $ptySource failed with exit $LASTEXITCODE"
+        }
+    }
+    Copy-Item -LiteralPath $ptySource -Destination (Join-Path $staging 'plugins\cubeone-pty') -Recurse
 
     Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $out
 } finally {

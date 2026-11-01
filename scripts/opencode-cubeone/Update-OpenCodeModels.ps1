@@ -49,6 +49,8 @@ $SearchEndpoint = 'azure/eu'
 $WebSearchProvider = 'cubeone-zdr'
 # Pinned: OpenCode installs plugin packages from npm at startup.
 $PlannotatorPackage = '@plannotator/opencode@0.28.43'
+$ContextPruningPackage = '@tarquinen/opencode-dcp@3.2.0'
+$MemoryPackage = 'opencode-mem@2.39.0'
 
 $AgentRoot = Join-Path $PSScriptRoot 'agents'
 $ReadOnly = @(
@@ -285,6 +287,17 @@ $config = [ordered]@{
                 planningAgents = @('plan', 'orchestrator')
             }
         }
+        # opencode-pty's "server" export is the V1 plugin. cubeone-pty loads the V2 entry.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-pty'
+            options = [ordered]@{
+                hostname  = '127.0.0.1'
+                port      = 0
+                autostart = $false
+            }
+        }
+        $ContextPruningPackage
+        $MemoryPackage
     )
 }
 
