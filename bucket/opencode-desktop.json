@@ -1,0 +1,83 @@
+{
+    "version": "2.2.5",
+    "description": "OpenCode Desktop with the cube one configuration: only OpenRouter models with zero data retention, locked managed settings and company rules, cube one MCP servers and dictation via OpenRouter EU",
+    "homepage": "https://opencode.ai",
+    "license": "MIT",
+    "notes": [
+        "The managed configuration lives in C:\\ProgramData\\opencode and is read-only for everyone except Administrators and SYSTEM.",
+        "Set OPENROUTER_API_KEY (user or machine environment) and OPENCODE_DISABLE_FREE_MODELS=1, then restart OpenCode.",
+        "MCP servers and optional rules are in ~\\.config\\opencode and stay editable."
+    ],
+    "architecture": {
+        "64bit": {
+            "url": [
+                "https://opencode.ai/files/bin/2.2.5/opencode-desktop-win-x64.exe#/dl.7z",
+                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.0.zip"
+            ],
+            "hash": [
+                "634cd9b3b0e6dea71285dc4ed98d54d6617721d5e302bc8c8661fc957c321cc8",
+                "58f460370ed2839aee63f9a887176e408d707dcbd915fb823ba0d6c3a959a3cf"
+            ],
+            "extract_to": [
+                "",
+                "cubeone"
+            ]
+        }
+    },
+    "installer": {
+        "script": [
+            "Expand-7zipArchive \"$dir\\`$PLUGINSDIR\\app-64.7z\" \"$dir\"",
+            "Remove-Item \"$dir\\`$PLUGINSDIR\", \"$dir\\`$R0\" -Recurse -Force -ErrorAction SilentlyContinue",
+            "Remove-Item \"$dir\\Uninstall OpenCode.exe\", \"$dir\\resources\\app-update.yml\" -Force -ErrorAction SilentlyContinue",
+            "",
+            "$shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source",
+            "if (-not $shell) {",
+            "    $shell = (Get-Command powershell).Source",
+            "}",
+            "& $shell -NoProfile -ExecutionPolicy Bypass -File \"$dir\\cubeone\\Install-OpenCodeCubeOne.ps1\" -SourceDir \"$dir\\cubeone\"",
+            "if ($LASTEXITCODE -ne 0) {",
+            "    throw \"cube one OpenCode configuration failed with exit code $LASTEXITCODE\"",
+            "}"
+        ]
+    },
+    "uninstaller": {
+        "script": [
+            "$managed = Join-Path $env:ProgramData 'opencode'",
+            "if (-not (Test-Path -LiteralPath $managed)) {",
+            "    return",
+            "}",
+            "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())",
+            "if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {",
+            "    Remove-Item -LiteralPath $managed -Recurse -Force",
+            "} else {",
+            "    warn \"$managed is read-only for this user. Remove it as administrator if OpenCode is no longer used.\"",
+            "}"
+        ]
+    },
+    "bin": [
+        [
+            "resources\\opencode-cli.exe",
+            "opencode"
+        ]
+    ],
+    "shortcuts": [
+        [
+            "OpenCode.exe",
+            "OpenCode"
+        ]
+    ],
+    "checkver": {
+        "url": "https://opencode.ai/update/api/latest/desktop/opencode/latest.yml",
+        "regex": "version:\\s*([\\d.]+)"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": [
+                    "https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z",
+                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.0.zip"
+                ]
+            }
+        }
+    }
+}

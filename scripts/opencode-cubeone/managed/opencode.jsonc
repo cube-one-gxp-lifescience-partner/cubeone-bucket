@@ -1,0 +1,564 @@
+// Managed by the cubeone-bucket opencode-desktop manifest. Do not edit on the machine.
+// Regenerate with scripts\opencode-cubeone\Update-OpenCodeModels.ps1.
+// Model list checked against https://openrouter.ai/api/v1/endpoints/zdr on 2026-11-01.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "update": "disable",
+  "share": "disabled",
+  "websearch": false,
+  "model": "openrouter-zdr/anthropic/claude-sonnet-5.5",
+  "providers": {
+    "openrouter-zdr": {
+      "name": "OpenRouter (ZDR)",
+      "package": "@opencode/ai/providers/openrouter",
+      "env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "settings": {
+        "baseURL": "https://openrouter.ai/api/v1"
+      },
+      "headers": {
+        "HTTP-Referer": "https://cubeone.de",
+        "X-Title": "OpenCode cube one"
+      },
+      "body": {
+        "provider": {
+          "zdr": true,
+          "data_collection": "deny"
+        }
+      },
+      "models": {
+        "anthropic/claude-opus-5.5": {
+          "name": "Claude Opus 5.5",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 4.0,
+            "output": 20.0
+          }
+        },
+        "anthropic/claude-sonnet-5.5": {
+          "name": "Claude Sonnet 5.5",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 2.0,
+            "output": 10.0
+          }
+        },
+        "anthropic/claude-haiku-5.5": {
+          "name": "Claude Haiku 5.5",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 0.1,
+            "output": 0.5
+          }
+        },
+        "openai/gpt-6.1-sol": {
+          "name": "GPT-6.1 Sol",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "image",
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 2.0,
+            "output": 10.0
+          }
+        },
+        "openai/gpt-6.1-terra": {
+          "name": "GPT-6.1 Terra",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "image",
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 1.0,
+            "output": 5.0
+          }
+        },
+        "openai/gpt-6-luna": {
+          "name": "GPT-6 Luna",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "image",
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 0.1,
+            "output": 0.5
+          }
+        },
+        "x-ai/grok-4.7": {
+          "name": "Grok 4.7",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 500000,
+            "output": 450000
+          },
+          "cost": {
+            "input": 2.0,
+            "output": 6.0
+          }
+        },
+        "mistralai/mistral-large-4-0": {
+          "name": "Mistral Large 4",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 262144
+          },
+          "cost": {
+            "input": 0.7,
+            "output": 2.1
+          }
+        },
+        "mistralai/mistral-medium-3-5": {
+          "name": "Mistral Medium 3.5",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 209715
+          },
+          "cost": {
+            "input": 1.5,
+            "output": 7.5
+          }
+        },
+        "mistralai/mistral-small-2603": {
+          "name": "Mistral Small 4",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 262144,
+            "output": 209715
+          },
+          "cost": {
+            "input": 0.15,
+            "output": 0.6
+          }
+        },
+        "deepseek/deepseek-v4-pro-0813": {
+          "name": "DeepSeek V4 Pro 0813",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 943718
+          },
+          "cost": {
+            "input": 0.115,
+            "output": 4.0
+          }
+        },
+        "deepseek/deepseek-v4.1-flash": {
+          "name": "DeepSeek V4.1 Flash",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 943718
+          },
+          "cost": {
+            "input": 0.045,
+            "output": 0.5
+          }
+        },
+        "moonshotai/kimi-k3.1-pro": {
+          "name": "Kimi K3.1 Pro",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 943718
+          },
+          "cost": {
+            "input": 2.0,
+            "output": 10.0
+          }
+        },
+        "z-ai/glm-5.3": {
+          "name": "GLM 5.3",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 943718
+          },
+          "cost": {
+            "input": 0.08,
+            "output": 3.6
+          }
+        },
+        "qwen/qwen3.8-2.4t-a95b": {
+          "name": "Qwen3.8 2.4T A95B",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 131072
+          },
+          "cost": {
+            "input": 2.0,
+            "output": 6.0
+          }
+        },
+        "qwen/qwen3.8-27b": {
+          "name": "Qwen3.8 27B",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 235929
+          },
+          "cost": {
+            "input": 0.15,
+            "output": 1.875
+          }
+        },
+        "minimax/minimax-m3": {
+          "name": "MiniMax M3",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ],
+            "reasoning": {
+              "supported": true,
+              "effort": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 512000
+          },
+          "cost": {
+            "input": 0.3,
+            "output": 1.2
+          }
+        }
+      }
+    }
+  },
+  "policies": [
+    {
+      "action": "provider.use",
+      "resource": "*",
+      "effect": "deny"
+    },
+    {
+      "action": "provider.use",
+      "resource": "openrouter-zdr",
+      "effect": "allow"
+    },
+    {
+      "action": "integration.connect",
+      "resource": "*",
+      "effect": "deny"
+    },
+    {
+      "action": "integration.use",
+      "resource": "*",
+      "effect": "deny"
+    },
+    {
+      "action": "integration.use",
+      "resource": "openrouter-zdr",
+      "effect": "allow"
+    }
+  ],
+  "instructions": [
+    "C:/ProgramData/opencode/rules/*.md",
+    "~/.config/opencode/rules/optional/*.md"
+  ],
+  "plugins": [
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-stt",
+      "options": {
+        "endpoint": "https://eu.openrouter.ai/api/v1",
+        "model": "mistralai/voxtral-mini-transcribe-3-0"
+      }
+    }
+  ]
+}
