@@ -40,14 +40,6 @@ export default Plugin.define({
   i18n: {
     en: {
       dictate: "Dictate",
-      "auto.menu": "Auto routing",
-      "auto.cost": "Cost",
-      "auto.cost.detail": "Cheapest capable models",
-      "auto.balanced": "Balanced",
-      "auto.balanced.detail": "Middle of the cost range",
-      "auto.intelligence": "Intelligence",
-      "auto.intelligence.detail": "Most capable models",
-      "auto.unavailable": "Auto is not available",
       listening: "Listening…",
       transcribing: "Transcribing…",
       "error.microphone": "Microphone not available",
@@ -60,14 +52,6 @@ export default Plugin.define({
     },
     de: {
       dictate: "Diktieren",
-      "auto.menu": "Auto-Routing",
-      "auto.cost": "Cost",
-      "auto.cost.detail": "Günstigste brauchbare Modelle",
-      "auto.balanced": "Balanced",
-      "auto.balanced.detail": "Mitte der Preisspanne",
-      "auto.intelligence": "Intelligence",
-      "auto.intelligence.detail": "Leistungsfähigste Modelle",
-      "auto.unavailable": "Auto ist nicht verfügbar",
       listening: "Hört zu …",
       transcribing: "Wird transkribiert …",
       "error.microphone": "Mikrofon nicht verfügbar",
@@ -210,35 +194,6 @@ export default Plugin.define({
       if (phase() === "recording") return stop()
       if (phase() === "idle") void start()
     }
-
-    const autoTiers = ["intelligence", "balanced", "cost"] as const
-    ctx.add(ComposerPill, {
-      id: "auto-route",
-      order: 10,
-      show: (input) => {
-        const current = input.screen.composer.model()
-        const onAuto = current?.providerID === "openrouter-zdr" && current.modelID === "openrouter/auto"
-        const active = onAuto ? (current.variant ?? "balanced") : undefined
-        const tierLabel =
-          active === "cost" || active === "balanced" || active === "intelligence" ? ctx.t(`auto.${active}`) : ctx.t("auto.balanced")
-        return {
-          label: onAuto ? tierLabel : "Auto",
-          title: ctx.t("auto.menu"),
-          rows: autoTiers.map((tier) => ({
-            id: tier,
-            label: ctx.t(`auto.${tier}`),
-            detail: ctx.t(`auto.${tier}.detail`),
-            icon: active === tier ? ("circle-check" as const) : undefined,
-            tone: active === tier ? ("success" as const) : undefined,
-            run: () => {
-              if (!input.screen.composer.setModel({ providerID: "openrouter-zdr", modelID: "openrouter/auto", variant: tier })) {
-                ctx.toast.show({ variant: "error", title: ctx.t("auto.unavailable") })
-              }
-            },
-          })),
-        }
-      },
-    })
 
     ctx.add(ComposerPill, {
       id: "dictate",
