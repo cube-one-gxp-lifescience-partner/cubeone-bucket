@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process"
 
-const AUTO_MODEL = "openrouter/auto"
 const WEBSEARCH_ID = "cubeone-zdr"
 const CHAT_COMPLETIONS = "https://openrouter.ai/api/v1/chat/completions"
 const SEARCH_TIMEOUT_MS = 90_000
@@ -18,18 +17,6 @@ const BUILD_ORCHESTRATION = `This session was planned by the orchestrator and it
 - Do small glue changes yourself only when delegating would cost more than the change.
 - At the end, check every acceptance criterion of the plan and report which are met, with evidence.`
 
-export function routedModel(text) {
-  const pattern = /"model"\s*:\s*"([^"\\]{1,160})"/g
-  let match
-  while ((match = pattern.exec(text))) {
-    const value = match[1]
-    if (!value || value === AUTO_MODEL || value.startsWith("openrouter/")) continue
-    if (!/^[A-Za-z0-9._:/-]+$/.test(value) || !value.includes("/")) continue
-    return value
-  }
-  return undefined
-}
-
 function option(options, key, fallback) {
   const value = options?.[key]
   return typeof value === "string" && value.trim() ? value.trim() : fallback
@@ -46,33 +33,6 @@ async function mergeMetadata(session, sessionID, key, value) {
   const previous = metadataOf(info)
   if (previous[key] === value) return
   await session.update({ sessionID, metadata: { ...previous, [key]: value } })
-}
-
-async function watch(session, sessionID, body) {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buffered = ""
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffered += decoder.decode(value, { stream: true })
-      if (buffered.length > 65536) buffered = buffered.slice(-8192)
-      const model = routedModel(buffered)
-      if (!model) continue
-      try {
-        await reader.cancel()
-      } catch {
-        // The other half of the stream stays with the app.
-      }
-      await mergeMetadata(session, sessionID, "routedModel", model)
-      return
-    }
-    const model = routedModel(buffered)
-    if (model) await mergeMetadata(session, sessionID, "routedModel", model)
-  } catch {
-    // The app still owns the other half of the stream. A failed read only skips the label.
-  }
 }
 
 function excerpt(text, start) {
@@ -209,28 +169,5 @@ export default {
       }
       input.system = [...(input.system ?? []), { type: "text", text: BUILD_ORCHESTRATION }]
     })
-
-    await ctx.session.hook(
-      "http.response",
-      (input) => {
-        if (input.kind !== "primary" || input.model?.id !== AUTO_MODEL) return
-        const body = input.response?.body
-        if (!body || !input.response.ok) return
-        let appBody
-        let watchBody
-        try {
-          ;[appBody, watchBody] = body.tee()
-        } catch {
-          return
-        }
-        input.response = new Response(appBody, {
-          status: input.response.status,
-          statusText: input.response.statusText,
-          headers: new Headers(input.response.headers),
-        })
-        void watch(ctx.session, input.sessionID, watchBody)
-      },
-      { providerID: "openrouter-zdr" },
-    )
   },
 }

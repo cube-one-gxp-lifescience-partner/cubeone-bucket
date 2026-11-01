@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import plugin, { routedModel, searchResults } from "../src/server.js"
+import plugin, { searchResults } from "../src/server.js"
 
 function fakeContext(metadata = {}) {
   const hooks = {}
@@ -36,39 +36,6 @@ function fakeContext(metadata = {}) {
   }
   return { ctx, hooks, updates }
 }
-
-test("reads the selected model from the first SSE event", () => {
-  const body = `data: {"id":"gen-1","model":"openrouter/auto","object":"chat.completion.chunk"}\n\ndata: {"id":"gen-1","model":"anthropic/claude-opus-5.5","choices":[]}\n\n`
-  assert.equal(routedModel(body), "anthropic/claude-opus-5.5")
-})
-
-test("reads a JSON body", () => {
-  assert.equal(routedModel('{"id":"gen-2","model":"openai/gpt-5.4","choices":[]}'), "openai/gpt-5.4")
-})
-
-test("ignores the router id and values that are not model ids", () => {
-  assert.equal(routedModel('{"model":"openrouter/auto"}'), undefined)
-  assert.equal(routedModel('{"model":"chat"}'), undefined)
-  assert.equal(routedModel(""), undefined)
-})
-
-test("stores the routed model and still returns the full response", async () => {
-  const { ctx, hooks, updates } = fakeContext({ keep: "yes" })
-  await plugin.setup(ctx)
-  const payload = 'data: {"model":"openrouter/auto"}\n\ndata: {"model":"anthropic/claude-opus-5.5","choices":[{"delta":{"content":"Hallo"}}]}\n\n'
-  const input = {
-    kind: "primary",
-    sessionID: "ses_1",
-    model: { id: "openrouter/auto" },
-    response: new Response(payload, { status: 200, headers: { "content-type": "text/event-stream" } }),
-  }
-  hooks["http.response"](input)
-  assert.equal(await input.response.text(), payload)
-  for (let attempt = 0; attempt < 20 && updates.length === 0; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-  assert.deepEqual(updates, [{ sessionID: "ses_1", metadata: { keep: "yes", routedModel: "anthropic/claude-opus-5.5" } }])
-})
 
 test("turns url citations into search results", () => {
   const content = "- **Changelog** — Release notes for 2.2. ([opencode.ai](https://opencode.ai/changelog))\n- **Releases** — Tagged builds. ([github.com](https://github.com/anomalyco/opencode/releases))"

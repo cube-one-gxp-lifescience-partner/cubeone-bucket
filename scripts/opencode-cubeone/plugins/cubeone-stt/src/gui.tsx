@@ -1,5 +1,6 @@
-import { createSignal, Show } from "solid-js"
-import { ComposerPill, Plugin, Slot, type ComposerPillView, type MountedSession } from "@opencode/plugin/gui"
+import { createSignal } from "solid-js"
+import { ComposerPill, Plugin, type ComposerPillView } from "@opencode/plugin/gui"
+import { documentText } from "./brief.js"
 import { Transcriber } from "./contract"
 import { main } from "./main"
 
@@ -24,6 +25,8 @@ const REQUIREMENTS_CSS = `
 }
 .cubeone-req textarea:focus { border-color: #F47A27; box-shadow: 0 0 0 2px rgba(244, 122, 39, 0.1); }
 .cubeone-req textarea[aria-invalid="true"] { border-color: #C0392B; }
+.cubeone-req input[type="file"] { font: inherit; font-size: 13px; }
+.cubeone-req .cubeone-req-file { opacity: 0.75; font-size: 13px; line-height: 1.5; }
 `
 
 function Field(props: { label: string; placeholder: string; rows: number; value: string; invalid?: boolean; onInput: (value: string) => void }) {
@@ -80,7 +83,6 @@ export default Plugin.define({
       "error.send": "Transcript is in the chat box. Press Enter to send it.",
       limit: "Recording stopped after five minutes",
       copied: "Transcript copied to the clipboard",
-      routed: "Model selected by Auto",
       "req.pill": "Requirements",
       "req.title": "Project requirements",
       "req.description": "The orchestrator turns them into a plan. You review and approve the plan before any file is written.",
@@ -94,7 +96,9 @@ export default Plugin.define({
       "req.constraints.placeholder": "Stack, conventions, deadlines, explicit non-goals",
       "req.cancel": "Cancel",
       "req.submit": "Start orchestrator",
-      "req.missing": "Enter at least the requirements",
+      "req.missing": "Enter the requirements or choose a PDF or Markdown file",
+      "req.file": "Or from a file",
+      "req.file.hint": "PDF or Markdown with requirements and goals. A filled field overrides the file.",
       "req.copied": "No session is open. The requirements are in the clipboard.",
       "req.failed": "Orchestrator could not be started",
       "req.intro": "Plan this project as orchestrator. Present the plan for approval before any file is changed.",
@@ -110,7 +114,6 @@ export default Plugin.define({
       "error.send": "Das Transkript steht im Eingabefeld. Mit Enter geht es in den Chat.",
       limit: "Aufnahme nach fünf Minuten beendet",
       copied: "Transkript in die Zwischenablage kopiert",
-      routed: "Von Auto gewähltes Modell",
       "req.pill": "Anforderungen",
       "req.title": "Projektanforderungen",
       "req.description": "Der Orchestrator macht daraus einen Plan. Du prüfst und genehmigst ihn, bevor eine Datei geschrieben wird.",
@@ -124,7 +127,9 @@ export default Plugin.define({
       "req.constraints.placeholder": "Stack, Konventionen, Termine, ausdrückliche Nicht-Ziele",
       "req.cancel": "Abbrechen",
       "req.submit": "Orchestrator starten",
-      "req.missing": "Bitte mindestens die Anforderungen eintragen",
+      "req.missing": "Bitte Anforderungen eintragen oder eine PDF- oder Markdown-Datei wählen",
+      "req.file": "Oder aus einer Datei",
+      "req.file.hint": "PDF oder Markdown mit Anforderungen und Zielen. Ein ausgefülltes Feld gilt vor der Datei.",
       "req.copied": "Es ist keine Sitzung offen. Die Anforderungen liegen in der Zwischenablage.",
       "req.failed": "Orchestrator konnte nicht starten",
       "req.intro": "Plane dieses Projekt als Orchestrator. Lege den Plan zur Genehmigung vor, bevor eine Datei geändert wird.",
@@ -262,39 +267,24 @@ export default Plugin.define({
       if (phase() === "idle") void start()
     }
 
-    const routedLabel = (session: MountedSession) => {
-      const info = session.server.data.session.get(session.id)
-      if (!info || info.model?.id !== "openrouter/auto") return ""
-      const routed = info.metadata?.routedModel
-      if (typeof routed !== "string" || !routed.includes("/")) return ""
-      const known = session.server.data.location.model.list(session.location)?.find((item) => item.modelID === routed)
-      return known?.name || routed
-    }
-
-    function RoutedModel(props: { session: () => MountedSession }) {
-      const label = () => routedLabel(props.session())
-      return (
-        <Show when={label()}>
-          {(model) => (
-            <span title={ctx.t("routed")} style={{ opacity: "0.72", "font-size": "12px", "line-height": "1.25", "white-space": "nowrap" }}>
-              {model()}
-            </span>
-          )}
-        </Show>
-      )
-    }
-
-    const requirementsPrompt = (fields: Requirements) => {
+    const requirementsPrompt = (fields: Requirements, document?: { name: string; text: string }) => {
       const section = (key: string, value: string) => (value.trim() ? `### ${ctx.t(key)}\n\n${value.trim()}` : "")
+      const file = document ? `### ${ctx.t("req.file")}\n\nDatei: ${document.name}\n\n${document.text}` : ""
       return [
         ctx.t("req.intro"),
         section("req.goal", fields.goal),
         section("req.requirements", fields.requirements),
         section("req.acceptance", fields.acceptance),
         section("req.constraints", fields.constraints),
+        file,
       ]
         .filter(Boolean)
         .join("\n\n")
+    }
+
+    const readBrief = async (file: File) => {
+      if (file.size > 8 * 1024 * 1024) throw new Error("Die Datei ist größer als 8 MB.")
+      return { name: file.name, text: await documentText(file.name, new Uint8Array(await file.arrayBuffer())) }
     }
 
     const startOrchestrator = async (text: string) => {
@@ -314,6 +304,7 @@ export default Plugin.define({
 
     const openRequirements = () => {
       const [fields, setFields] = createSignal<Requirements>({ goal: "", requirements: "", acceptance: "", constraints: "" })
+      const [brief, setBrief] = createSignal<File | undefined>()
       const [busy, setBusy] = createSignal(false)
       const [invalid, setInvalid] = createSignal(false)
       const set = (key: keyof Requirements) => (value: string) => {
@@ -323,14 +314,16 @@ export default Plugin.define({
 
       ctx.dialogs.open((dialog) => {
         const submit = async () => {
-          if (!fields().requirements.trim()) {
+          const file = brief()
+          if (!fields().requirements.trim() && !file) {
             setInvalid(true)
             ctx.toast.show({ variant: "default", title: ctx.t("req.missing") })
             return
           }
           setBusy(true)
           try {
-            await startOrchestrator(requirementsPrompt(fields()))
+            const document = file ? await readBrief(file) : undefined
+            await startOrchestrator(requirementsPrompt(fields(), document))
             dialog.close()
           } catch (error) {
             ctx.toast.show({
@@ -375,6 +368,20 @@ export default Plugin.define({
               <Field label={ctx.t("req.requirements")} placeholder={ctx.t("req.requirements.placeholder")} rows={7} invalid={invalid()} value={fields().requirements} onInput={set("requirements")} />
               <Field label={ctx.t("req.acceptance")} placeholder={ctx.t("req.acceptance.placeholder")} rows={4} value={fields().acceptance} onInput={set("acceptance")} />
               <Field label={ctx.t("req.constraints")} placeholder={ctx.t("req.constraints.placeholder")} rows={3} value={fields().constraints} onInput={set("constraints")} />
+              <label>
+                <span>{ctx.t("req.file")}</span>
+                <input
+                  type="file"
+                  accept=".pdf,.md,.markdown,application/pdf,text/markdown"
+                  aria-invalid={invalid() && !fields().requirements.trim() ? "true" : undefined}
+                  onChange={(event) => {
+                    const picked = event.currentTarget.files?.[0]
+                    setBrief(picked)
+                    if (picked) setInvalid(false)
+                  }}
+                />
+                <span class="cubeone-req-file">{brief()?.name || ctx.t("req.file.hint")}</span>
+              </label>
             </div>
           </ctx.ui.Dialog>
         )
@@ -389,12 +396,6 @@ export default Plugin.define({
         title: ctx.t("req.title"),
         run: openRequirements,
       }),
-    })
-
-    ctx.add(Slot, {
-      at: "session.header",
-      order: 10,
-      render: (input) => <RoutedModel session={() => input.session} />,
     })
 
     ctx.add(ComposerPill, {

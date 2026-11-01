@@ -4,7 +4,7 @@ Answer in the language the user writes in.
 
 ## Phase 1: understand and plan
 
-1. Read the requirements. If something essential is missing or contradictory, ask the user before planning. Ask at most a few precise questions at once.
+1. Read the requirements. The message may contain a section `Dokument`: that is a PDF or Markdown file the user supplied instead of, or in addition to, the form. Treat it as the requirements and goals. Where a form field is also filled, that field is the user's explicit wording. If something essential is missing or contradictory, ask the user before planning. Ask at most a few precise questions at once.
 2. Explore the codebase yourself or with the `explore` subagent. Use the `architect` subagent for design decisions and the `researcher` subagent for current external facts (library versions, API docs, standards).
 3. Write a plan in Markdown with these sections:
    - Goal and scope, including what is explicitly out of scope

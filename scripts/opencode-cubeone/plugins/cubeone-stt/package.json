@@ -1,7 +1,7 @@
 {
   "name": "cubeone-stt",
   "version": "1.1.1",
-  "description": "cube one OpenCode plugin: dictation, Auto model label, requirements for the orchestrator, ZDR web search",
+  "description": "cube one OpenCode plugin: dictation, requirements for the orchestrator, ZDR web search",
   "private": true,
   "type": "module",
   "exports": {
@@ -11,7 +11,7 @@
   "scripts": {
     "build": "vite build && node script/copy-server.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/server.test.js"
+    "test": "node --test test/server.test.js test/brief.test.js"
   },
   "devDependencies": {
     "@opencode/plugin": "2.2.5",
