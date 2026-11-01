@@ -5,7 +5,9 @@
   "$schema": "https://opencode.ai/config.json",
   "update": "disable",
   "share": "disabled",
-  "websearch": false,
+  "websearch": {
+    "provider": "cubeone-zdr"
+  },
   "model": "openrouter-zdr/anthropic/claude-sonnet-5.5",
   "providers": {
     "openrouter-zdr": {
@@ -688,6 +690,184 @@
       "effect": "allow"
     }
   ],
+  "agents": {
+    "orchestrator": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "anthropic/claude-opus-5.5"
+      },
+      "mode": "primary",
+      "description": "Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.",
+      "system": "You are the orchestrator for large software projects. You plan the work and later coordinate other agents that run on other models. You do not edit files yourself.\r\n\r\nAnswer in the language the user writes in.\r\n\r\n## Phase 1: understand and plan\r\n\r\n1. Read the requirements. If something essential is missing or contradictory, ask the user before planning. Ask at most a few precise questions at once.\r\n2. Explore the codebase yourself or with the `explore` subagent. Use the `architect` subagent for design decisions and the `researcher` subagent for current external facts (library versions, API docs, standards).\r\n3. Write a plan in Markdown with these sections:\r\n   - Goal and scope, including what is explicitly out of scope\r\n   - Architecture and key decisions, with the reason for each\r\n   - Work packages, numbered. Each package names: the files or modules it touches, the subagent that does it, its dependencies on other packages, and how it is verified (tests, build, manual check)\r\n   - Packages that can run in parallel\r\n   - Risks and open questions\r\n   - Acceptance criteria taken from the requirements\r\n4. Submit the plan with the `submit_plan` tool and stop. Do not start any implementation before the user approved the plan. If the user sends feedback, revise the plan and submit it again.\r\n\r\n## Subagents\r\n\r\nPick the agent by the kind of work, because each one runs on a different model:\r\n\r\n- `architect` (Claude Opus): design, interfaces, data models, trade-offs. Read-only.\r\n- `researcher` (GPT-6 Luna with zero-data-retention web search in the EU): current external facts with sources. Read-only.\r\n- `developer` (Claude Sonnet): implements one work package, including its tests.\r\n- `quick` (Claude Haiku): small mechanical changes such as renames, boilerplate, formatting, simple tests.\r\n- `reviewer` (GPT-6.1 Sol): independent review of a finished package against the plan, runs tests and the build. Read-only.\r\n- `explore`: fast search in the codebase.\r\n\r\nGive every subagent a self-contained task: the goal, the relevant files, the constraints from the plan, and what it must report back. Subagents do not see this conversation.\r\n\r\n## Phase 2: after approval\r\n\r\nAfter approval the session continues with the build agent, which follows the same plan and delegates the packages to these subagents.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "architect",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "researcher",
+          "effect": "allow"
+        }
+      ]
+    },
+    "architect": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "anthropic/claude-opus-5.5"
+      },
+      "mode": "subagent",
+      "description": "Design, interfaces, data models and trade-offs for one question. Read-only.",
+      "system": "You are a software architect. You receive one design question from the orchestrator.\r\n\r\n- Read the relevant code before you answer. Do not create, modify or delete files. Shell commands must be read-only.\r\n- Propose a concrete design: modules, interfaces, data model, error handling, security and migration concerns.\r\n- When there are real alternatives, compare at most three and recommend one with the reason.\r\n- Name the files that change and the order in which the work should happen.\r\n- Report back in a compact form the orchestrator can paste into a plan.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    "researcher": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "openai/gpt-6-luna"
+      },
+      "mode": "subagent",
+      "description": "Current external facts with sources via zero-data-retention web search. Read-only.",
+      "system": "You research external facts for a software project: current library versions, API documentation, standards, known issues.\r\n\r\n- Use the web search and web fetch tools. Prefer official documentation, release notes and specifications over blogs.\r\n- Never put secrets, customer data, internal hostnames or source code into a search query. Search for the public concept instead.\r\n- Do not create, modify or delete files.\r\n- Report each finding with its source URL and the date or version it applies to. Say clearly when sources disagree or when you could not verify something.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ]
+    },
+    "developer": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "anthropic/claude-sonnet-5.5"
+      },
+      "mode": "subagent",
+      "description": "Implements one work package of an approved plan, including its tests.",
+      "system": "You implement exactly one work package from an approved plan.\r\n\r\n- Stay inside the scope of the package. If the package cannot be done as described, stop and report why instead of redesigning it.\r\n- Match the style, naming and structure of the surrounding code.\r\n- Add or update tests for what you change and run them, together with the build or type check if the project has one.\r\n- Report back: the files you changed, what the tests and checks returned, and anything the orchestrator must know for the next packages.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    "quick": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "anthropic/claude-haiku-5.5"
+      },
+      "mode": "subagent",
+      "description": "Small mechanical changes: renames, boilerplate, formatting, simple tests.",
+      "system": "You do small, mechanical changes: renames, boilerplate, formatting, simple tests, updating references.\r\n\r\n- Do exactly what the task says and nothing more.\r\n- Run the relevant tests or the formatter afterwards when the project has them.\r\n- Report the files you changed and the result of the checks in a few lines.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    "reviewer": {
+      "model": {
+        "providerID": "openrouter-zdr",
+        "model": "openai/gpt-6.1-sol"
+      },
+      "mode": "subagent",
+      "description": "Independent review of a finished work package against the plan; runs tests and the build. Read-only.",
+      "system": "You review a finished work package independently. You did not write it.\r\n\r\n- Compare the change with the plan and the acceptance criteria you are given.\r\n- Look for bugs, missing error handling, security problems (secrets, injection, missing authorization checks), missing tests and changes outside the package's scope.\r\n- Run the tests and the build. Do not create, modify or delete files.\r\n- Report findings ordered by severity, each with file and line and a concrete fix. Say explicitly when you found nothing that blocks the package.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    }
+  },
   "instructions": [
     "C:/ProgramData/opencode/rules/*.md",
     "~/.config/opencode/rules/optional/*.md"
@@ -697,7 +877,20 @@
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-stt",
       "options": {
         "endpoint": "https://eu.openrouter.ai/api/v1",
-        "model": "mistralai/voxtral-mini-transcribe-3-0"
+        "model": "mistralai/voxtral-mini-transcribe-3-0",
+        "search": true,
+        "search_model": "openai/gpt-6-luna",
+        "search_endpoint": "azure/eu"
+      }
+    },
+    {
+      "package": "@plannotator/opencode@0.28.43",
+      "options": {
+        "workflow": "plan-agent",
+        "planningAgents": [
+          "plan",
+          "orchestrator"
+        ]
       }
     }
   ]

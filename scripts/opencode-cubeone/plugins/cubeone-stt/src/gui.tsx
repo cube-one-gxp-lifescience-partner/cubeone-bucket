@@ -8,7 +8,38 @@ const MIN_RECORDING_MS = 400
 const SILENCE_MS = 3000
 const SPEECH_LEVEL = 0.02
 
+const ORCHESTRATOR = "orchestrator"
+
 type Phase = "idle" | "recording" | "transcribing"
+
+type Requirements = { goal: string; requirements: string; acceptance: string; constraints: string }
+
+const REQUIREMENTS_CSS = `
+.cubeone-req { display: flex; flex-direction: column; gap: 14px; }
+.cubeone-req label { display: flex; flex-direction: column; gap: 6px; }
+.cubeone-req label > span { font-weight: 600; line-height: 1.25; }
+.cubeone-req textarea {
+  font: inherit; line-height: 1.5; color: inherit; background: transparent; resize: vertical;
+  min-height: 40px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-base, rgba(127,127,127,0.35)); outline: none;
+}
+.cubeone-req textarea:focus { border-color: #F47A27; box-shadow: 0 0 0 2px rgba(244, 122, 39, 0.1); }
+.cubeone-req textarea[aria-invalid="true"] { border-color: #C0392B; }
+`
+
+function Field(props: { label: string; placeholder: string; rows: number; value: string; invalid?: boolean; onInput: (value: string) => void }) {
+  return (
+    <label>
+      <span>{props.label}</span>
+      <textarea
+        rows={props.rows}
+        placeholder={props.placeholder}
+        value={props.value}
+        aria-invalid={props.invalid ? "true" : undefined}
+        onInput={(event) => props.onInput(event.currentTarget.value)}
+      />
+    </label>
+  )
+}
 
 function toBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer)
@@ -50,6 +81,23 @@ export default Plugin.define({
       limit: "Recording stopped after five minutes",
       copied: "Transcript copied to the clipboard",
       routed: "Model selected by Auto",
+      "req.pill": "Requirements",
+      "req.title": "Project requirements",
+      "req.description": "The orchestrator turns them into a plan. You review and approve the plan before any file is written.",
+      "req.goal": "Goal",
+      "req.goal.placeholder": "What should exist at the end?",
+      "req.requirements": "Requirements",
+      "req.requirements.placeholder": "One requirement per line: features, users, data, interfaces",
+      "req.acceptance": "Acceptance criteria",
+      "req.acceptance.placeholder": "How do we know it is done? Tests, behaviour, performance",
+      "req.constraints": "Constraints",
+      "req.constraints.placeholder": "Stack, conventions, deadlines, explicit non-goals",
+      "req.cancel": "Cancel",
+      "req.submit": "Start orchestrator",
+      "req.missing": "Enter at least the requirements",
+      "req.copied": "No session is open. The requirements are in the clipboard.",
+      "req.failed": "Orchestrator could not be started",
+      "req.intro": "Plan this project as orchestrator. Present the plan for approval before any file is changed.",
     },
     de: {
       dictate: "Diktieren",
@@ -63,6 +111,23 @@ export default Plugin.define({
       limit: "Aufnahme nach fünf Minuten beendet",
       copied: "Transkript in die Zwischenablage kopiert",
       routed: "Von Auto gewähltes Modell",
+      "req.pill": "Anforderungen",
+      "req.title": "Projektanforderungen",
+      "req.description": "Der Orchestrator macht daraus einen Plan. Du prüfst und genehmigst ihn, bevor eine Datei geschrieben wird.",
+      "req.goal": "Ziel",
+      "req.goal.placeholder": "Was soll am Ende stehen?",
+      "req.requirements": "Anforderungen",
+      "req.requirements.placeholder": "Eine Anforderung pro Zeile: Funktionen, Nutzer, Daten, Schnittstellen",
+      "req.acceptance": "Akzeptanzkriterien",
+      "req.acceptance.placeholder": "Woran erkennen wir, dass es fertig ist? Tests, Verhalten, Leistung",
+      "req.constraints": "Rahmenbedingungen",
+      "req.constraints.placeholder": "Stack, Konventionen, Termine, ausdrückliche Nicht-Ziele",
+      "req.cancel": "Abbrechen",
+      "req.submit": "Orchestrator starten",
+      "req.missing": "Bitte mindestens die Anforderungen eintragen",
+      "req.copied": "Es ist keine Sitzung offen. Die Anforderungen liegen in der Zwischenablage.",
+      "req.failed": "Orchestrator konnte nicht starten",
+      "req.intro": "Plane dieses Projekt als Orchestrator. Lege den Plan zur Genehmigung vor, bevor eine Datei geändert wird.",
     },
   },
   setup(ctx) {
@@ -218,6 +283,113 @@ export default Plugin.define({
         </Show>
       )
     }
+
+    const requirementsPrompt = (fields: Requirements) => {
+      const section = (key: string, value: string) => (value.trim() ? `### ${ctx.t(key)}\n\n${value.trim()}` : "")
+      return [
+        ctx.t("req.intro"),
+        section("req.goal", fields.goal),
+        section("req.requirements", fields.requirements),
+        section("req.acceptance", fields.acceptance),
+        section("req.constraints", fields.constraints),
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    }
+
+    const startOrchestrator = async (text: string) => {
+      const session = ctx.sessions.current()
+      const composer = ctx.screen.current()?.composer
+      if (!session || !composer) {
+        await ctx.system.copy(text)
+        ctx.toast.show({ variant: "default", title: ctx.t("req.copied") })
+        return
+      }
+      await session.server.client.session.switchAgent({ sessionID: session.id, agent: ORCHESTRATOR })
+      composer.setText(text)
+      window.setTimeout(() => {
+        if (!ctx.commands.run("prompt.submit")) composer.focus()
+      }, 50)
+    }
+
+    const openRequirements = () => {
+      const [fields, setFields] = createSignal<Requirements>({ goal: "", requirements: "", acceptance: "", constraints: "" })
+      const [busy, setBusy] = createSignal(false)
+      const [invalid, setInvalid] = createSignal(false)
+      const set = (key: keyof Requirements) => (value: string) => {
+        setFields({ ...fields(), [key]: value })
+        if (key === "requirements" && value.trim()) setInvalid(false)
+      }
+
+      ctx.dialogs.open((dialog) => {
+        const submit = async () => {
+          if (!fields().requirements.trim()) {
+            setInvalid(true)
+            ctx.toast.show({ variant: "default", title: ctx.t("req.missing") })
+            return
+          }
+          setBusy(true)
+          try {
+            await startOrchestrator(requirementsPrompt(fields()))
+            dialog.close()
+          } catch (error) {
+            ctx.toast.show({
+              variant: "error",
+              title: ctx.t("req.failed"),
+              description: error instanceof Error ? error.message : String(error),
+            })
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        return (
+          <ctx.ui.Dialog
+            title={ctx.t("req.title")}
+            description={ctx.t("req.description")}
+            size="x-large"
+            footer={
+              <>
+                <ctx.ui.Button variant="neutral" onClick={dialog.close}>
+                  {ctx.t("req.cancel")}
+                </ctx.ui.Button>
+                <ctx.ui.Button variant="contrast" icon="checklist" busy={busy()} onClick={() => void submit()}>
+                  {ctx.t("req.submit")}
+                </ctx.ui.Button>
+              </>
+            }
+          >
+            <style>{REQUIREMENTS_CSS}</style>
+            <div class="cubeone-req">
+              <label>
+                <span>{ctx.t("req.goal")}</span>
+                <ctx.ui.TextInput
+                  size="large"
+                  autofocus
+                  label={ctx.t("req.goal")}
+                  placeholder={ctx.t("req.goal.placeholder")}
+                  value={fields().goal}
+                  onInput={set("goal")}
+                />
+              </label>
+              <Field label={ctx.t("req.requirements")} placeholder={ctx.t("req.requirements.placeholder")} rows={7} invalid={invalid()} value={fields().requirements} onInput={set("requirements")} />
+              <Field label={ctx.t("req.acceptance")} placeholder={ctx.t("req.acceptance.placeholder")} rows={4} value={fields().acceptance} onInput={set("acceptance")} />
+              <Field label={ctx.t("req.constraints")} placeholder={ctx.t("req.constraints.placeholder")} rows={3} value={fields().constraints} onInput={set("constraints")} />
+            </div>
+          </ctx.ui.Dialog>
+        )
+      })
+    }
+
+    ctx.add(ComposerPill, {
+      id: "requirements",
+      show: (): ComposerPillView => ({
+        label: ctx.t("req.pill"),
+        icon: "checklist",
+        title: ctx.t("req.title"),
+        run: openRequirements,
+      }),
+    })
 
     ctx.add(Slot, {
       at: "session.header",

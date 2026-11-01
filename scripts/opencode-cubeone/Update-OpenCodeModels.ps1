@@ -42,6 +42,79 @@ $CuratedModels = @(
     'minimax/minimax-m3'
 )
 
+# Web search runs as the provider's native search on one pinned ZDR endpoint. OpenRouter's own
+# search engines (Exa, Parallel, Perplexity) are outside ZDR and unavailable on eu.openrouter.ai.
+$SearchModel = 'openai/gpt-6-luna'
+$SearchEndpoint = 'azure/eu'
+$WebSearchProvider = 'cubeone-zdr'
+# Pinned: OpenCode installs plugin packages from npm at startup.
+$PlannotatorPackage = '@plannotator/opencode@0.28.43'
+
+$AgentRoot = Join-Path $PSScriptRoot 'agents'
+$ReadOnly = @(
+    [ordered]@{ action = '*'; resource = '*'; effect = 'allow' }
+    [ordered]@{ action = 'edit'; resource = '*'; effect = 'deny' }
+    [ordered]@{ action = 'subagent'; resource = '*'; effect = 'deny' }
+)
+$Agents = [ordered]@{
+    orchestrator = [ordered]@{
+        model       = 'anthropic/claude-opus-5.5'
+        mode        = 'primary'
+        description = 'Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.'
+        permissions = @(
+            [ordered]@{ action = '*'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'edit'; resource = '*'; effect = 'deny' }
+            [ordered]@{ action = 'subagent'; resource = '*'; effect = 'deny' }
+            [ordered]@{ action = 'subagent'; resource = 'explore'; effect = 'allow' }
+            [ordered]@{ action = 'subagent'; resource = 'architect'; effect = 'allow' }
+            [ordered]@{ action = 'subagent'; resource = 'researcher'; effect = 'allow' }
+        )
+    }
+    architect    = [ordered]@{
+        model       = 'anthropic/claude-opus-5.5'
+        mode        = 'subagent'
+        description = 'Design, interfaces, data models and trade-offs for one question. Read-only.'
+        permissions = $ReadOnly
+    }
+    researcher   = [ordered]@{
+        model       = $SearchModel
+        mode        = 'subagent'
+        description = 'Current external facts with sources via zero-data-retention web search. Read-only.'
+        permissions = @(
+            [ordered]@{ action = '*'; resource = '*'; effect = 'deny' }
+            [ordered]@{ action = 'read'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'grep'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'glob'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'websearch'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'webfetch'; resource = '*'; effect = 'allow' }
+        )
+    }
+    developer    = [ordered]@{
+        model       = 'anthropic/claude-sonnet-5.5'
+        mode        = 'subagent'
+        description = 'Implements one work package of an approved plan, including its tests.'
+        permissions = @(
+            [ordered]@{ action = '*'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'subagent'; resource = '*'; effect = 'deny' }
+        )
+    }
+    quick        = [ordered]@{
+        model       = 'anthropic/claude-haiku-5.5'
+        mode        = 'subagent'
+        description = 'Small mechanical changes: renames, boilerplate, formatting, simple tests.'
+        permissions = @(
+            [ordered]@{ action = '*'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'subagent'; resource = '*'; effect = 'deny' }
+        )
+    }
+    reviewer     = [ordered]@{
+        model       = 'openai/gpt-6.1-sol'
+        mode        = 'subagent'
+        description = 'Independent review of a finished work package against the plan; runs tests and the build. Read-only.'
+        permissions = $ReadOnly
+    }
+}
+
 $headers = @{ 'User-Agent' = 'cubeone-bucket/opencode-models' }
 $catalog = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/models' -Headers $headers).data
 $zdrEndpoints = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/endpoints/zdr' -Headers $headers).data
@@ -132,11 +205,42 @@ else {
     }
 }
 
+$searchReady = @($zdrEndpoints | Where-Object {
+        $_.model_id -eq $SearchModel -and $_.tag -eq $SearchEndpoint -and -not $_.safety_retention -and
+        $_.native_tools -and $_.native_tools.'openrouter:web_search'
+    }).Count -gt 0
+if (-not $searchReady) {
+    Write-Warning "$SearchModel has no ZDR endpoint $SearchEndpoint with native web search. Web search is disabled."
+}
+
+$agentConfig = [ordered]@{}
+foreach ($name in $Agents.Keys) {
+    $agent = $Agents[$name]
+    $modelId = $agent.model
+    if (-not $models.Contains($modelId)) {
+        Write-Warning "Agent $name uses $modelId, which did not pass the ZDR check. It falls back to $DefaultModel."
+        $modelId = $DefaultModel
+    }
+    if ($name -eq 'researcher' -and -not $searchReady) {
+        continue
+    }
+    $agentConfig[$name] = [ordered]@{
+        model       = [ordered]@{ providerID = $ProviderId; model = $modelId }
+        mode        = $agent.mode
+        description = $agent.description
+        system      = (Get-Content -LiteralPath (Join-Path $AgentRoot "$name.md") -Raw -Encoding utf8).Trim()
+        permissions = @($agent.permissions)
+    }
+}
+if (-not $searchReady) {
+    $agentConfig.orchestrator.permissions = @($agentConfig.orchestrator.permissions | Where-Object { $_.resource -ne 'researcher' })
+}
+
 $config = [ordered]@{
     '$schema'    = 'https://opencode.ai/config.json'
     update       = 'disable'
     share        = 'disabled'
-    websearch    = $false
+    websearch    = $(if ($searchReady) { [ordered]@{ provider = $WebSearchProvider } } else { $false })
     model        = "$ProviderId/$DefaultModel"
     providers    = [ordered]@{
         $ProviderId = [ordered]@{
@@ -158,6 +262,7 @@ $config = [ordered]@{
         # OpenCode registers every remote MCP server with OAuth as integration mcp_<sha1>.
         [ordered]@{ action = 'integration.use'; resource = 'mcp_*'; effect = 'allow' }
     )
+    agents       = $agentConfig
     instructions = @(
         'C:/ProgramData/opencode/rules/*.md'
         '~/.config/opencode/rules/optional/*.md'
@@ -166,8 +271,18 @@ $config = [ordered]@{
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-stt'
             options = [ordered]@{
-                endpoint = 'https://eu.openrouter.ai/api/v1'
-                model    = 'mistralai/voxtral-mini-transcribe-3-0'
+                endpoint        = 'https://eu.openrouter.ai/api/v1'
+                model           = 'mistralai/voxtral-mini-transcribe-3-0'
+                search          = $searchReady
+                search_model    = $SearchModel
+                search_endpoint = $SearchEndpoint
+            }
+        }
+        [ordered]@{
+            package = $PlannotatorPackage
+            options = [ordered]@{
+                workflow       = 'plan-agent'
+                planningAgents = @('plan', 'orchestrator')
             }
         }
     )
