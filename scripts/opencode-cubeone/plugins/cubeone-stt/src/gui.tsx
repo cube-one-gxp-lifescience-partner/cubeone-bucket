@@ -1,10 +1,12 @@
 import { createSignal } from "solid-js"
-import { Command, ComposerPill, Plugin, TitlebarItem, type ComposerPillView } from "@opencode/plugin/gui"
+import { ComposerPill, Plugin, type ComposerPillView } from "@opencode/plugin/gui"
 import { Transcriber } from "./contract"
 import { main } from "./main"
 
 const MAX_RECORDING_MS = 5 * 60 * 1000
 const MIN_RECORDING_MS = 400
+const SILENCE_MS = 3000
+const SPEECH_LEVEL = 0.02
 
 type Phase = "idle" | "recording" | "transcribing"
 
@@ -23,34 +25,42 @@ function formatOf(mimeType: string) {
   return "webm"
 }
 
+function speechLevel(analyser: AnalyserNode, samples: Uint8Array<ArrayBuffer>) {
+  analyser.getByteTimeDomainData(samples)
+  let sum = 0
+  for (let index = 0; index < samples.length; index++) {
+    const sample = ((samples[index] ?? 128) - 128) / 128
+    sum += sample * sample
+  }
+  return Math.sqrt(sum / samples.length)
+}
+
 export default Plugin.define({
   os: ["windows", "macos", "linux"],
   i18n: {
     en: {
       dictate: "Dictate",
-      stop: "Stop recording",
+      listening: "Listening…",
       transcribing: "Transcribing…",
-      "command.toggle": "Start or stop dictation",
-      "command.group": "Dictation",
       "error.microphone": "Microphone not available",
       "error.microphone.hint": "Allow microphone access for desktop apps in the Windows privacy settings.",
       "error.transcription": "Transcription failed",
       "error.empty": "No speech recognized",
-      "limit": "Recording stopped after five minutes",
-      "copied": "Transcript copied to the clipboard",
+      "error.send": "Transcript is in the chat box. Press Enter to send it.",
+      limit: "Recording stopped after five minutes",
+      copied: "Transcript copied to the clipboard",
     },
     de: {
       dictate: "Diktieren",
-      stop: "Aufnahme beenden",
+      listening: "Hört zu …",
       transcribing: "Wird transkribiert …",
-      "command.toggle": "Diktat starten oder beenden",
-      "command.group": "Diktat",
       "error.microphone": "Mikrofon nicht verfügbar",
       "error.microphone.hint": "Unter Windows-Einstellungen > Datenschutz > Mikrofon den Zugriff für Desktop-Apps erlauben.",
       "error.transcription": "Transkription fehlgeschlagen",
       "error.empty": "Keine Sprache erkannt",
-      "limit": "Aufnahme nach fünf Minuten beendet",
-      "copied": "Transkript in die Zwischenablage kopiert",
+      "error.send": "Das Transkript steht im Eingabefeld. Mit Enter geht es in den Chat.",
+      limit: "Aufnahme nach fünf Minuten beendet",
+      copied: "Transkript in die Zwischenablage kopiert",
     },
   },
   setup(ctx) {
@@ -59,11 +69,19 @@ export default Plugin.define({
     let recorder: MediaRecorder | undefined
     let stream: MediaStream | undefined
     let limitTimer: ReturnType<typeof setTimeout> | undefined
+    let silenceTimer: ReturnType<typeof setInterval> | undefined
+    let audio: AudioContext | undefined
     let startedAt = 0
+    let quietSince = 0
+    let heardSpeech = false
 
     const release = () => {
       if (limitTimer) clearTimeout(limitTimer)
+      if (silenceTimer) clearInterval(silenceTimer)
       limitTimer = undefined
+      silenceTimer = undefined
+      void audio?.close()
+      audio = undefined
       stream?.getTracks().forEach((track) => track.stop())
       stream = undefined
       recorder = undefined
@@ -72,21 +90,27 @@ export default Plugin.define({
     const deliver = async (blob: Blob, mimeType: string) => {
       setPhase("transcribing")
       try {
-        const audio = toBase64(await blob.arrayBuffer())
-        const { text } = await transcriber.transcribe({ audio, format: formatOf(mimeType) }, { signal: ctx.signal })
+        const encoded = toBase64(await blob.arrayBuffer())
+        const { text } = await transcriber.transcribe({ audio: encoded, format: formatOf(mimeType) }, { signal: ctx.signal })
         if (!text) {
           ctx.toast.show({ variant: "default", title: ctx.t("error.empty") })
           return
         }
         const composer = ctx.screen.current()?.composer
-        if (composer) {
-          const before = composer.text()
-          composer.insert(before && !/\s$/.test(before) ? ` ${text}` : text)
-          composer.focus()
-        } else {
+        if (!composer) {
           await ctx.system.copy(text)
           ctx.toast.show({ variant: "success", title: ctx.t("copied") })
+          return
         }
+        const before = composer.text()
+        composer.setText(before && !/\s$/.test(before) ? `${before} ${text}` : `${before}${text}`)
+        composer.focus()
+        // The draft write is applied before the next turn. The app's own submit command then sends it.
+        window.setTimeout(() => {
+          if (!ctx.commands.run("prompt.submit")) {
+            ctx.toast.show({ variant: "default", title: ctx.t("error.send") })
+          }
+        }, 50)
       } catch (error) {
         ctx.toast.show({
           variant: "error",
@@ -98,7 +122,28 @@ export default Plugin.define({
       }
     }
 
+    const watchSilence = (media: MediaStream) => {
+      const context = new AudioContext()
+      audio = context
+      const source = context.createMediaStreamSource(media)
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 2048
+      source.connect(analyser)
+      const samples = new Uint8Array(analyser.fftSize)
+      quietSince = Date.now()
+      silenceTimer = setInterval(() => {
+        if (recorder?.state !== "recording") return
+        if (speechLevel(analyser, samples) >= SPEECH_LEVEL) {
+          heardSpeech = true
+          quietSince = Date.now()
+          return
+        }
+        if (Date.now() - quietSince >= SILENCE_MS) stop()
+      }, 100)
+    }
+
     const start = async () => {
+      heardSpeech = false
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -121,9 +166,10 @@ export default Plugin.define({
       }
       active.onstop = () => {
         const duration = Date.now() - startedAt
+        const spoke = heardSpeech
         const type = active.mimeType || mimeType || "audio/webm"
         release()
-        if (duration < MIN_RECORDING_MS || chunks.length === 0) {
+        if (!spoke || duration < MIN_RECORDING_MS || chunks.length === 0) {
           setPhase("idle")
           return
         }
@@ -132,6 +178,7 @@ export default Plugin.define({
       recorder = active
       startedAt = Date.now()
       active.start()
+      watchSilence(stream)
       setPhase("recording")
       limitTimer = setTimeout(() => {
         ctx.toast.show({ variant: "default", title: ctx.t("limit") })
@@ -148,38 +195,16 @@ export default Plugin.define({
       if (phase() === "idle") void start()
     }
 
-    ctx.add(TitlebarItem, (): TitlebarItem => ({
-      id: "dictate",
-      label: phase() === "recording" ? ctx.t("stop") : phase() === "transcribing" ? ctx.t("transcribing") : ctx.t("dictate"),
-      icon: phase() === "recording" ? "stop" : "outline-audio",
-      pressed: phase() === "recording",
-      busy: phase() === "transcribing",
-      run: toggle,
-    }))
-
     ctx.add(ComposerPill, {
       id: "dictate",
       show: (): ComposerPillView => ({
-        label: phase() === "recording" ? ctx.t("stop") : phase() === "transcribing" ? ctx.t("transcribing") : ctx.t("dictate"),
-        icon: phase() === "recording" ? "stop" : phase() === "transcribing" ? "waveform" : "outline-audio",
+        label: phase() === "recording" ? ctx.t("listening") : phase() === "transcribing" ? ctx.t("transcribing") : ctx.t("dictate"),
+        icon: phase() === "recording" ? "stop" : "outline-audio",
         tone: phase() === "recording" ? "danger" : undefined,
+        title: ctx.t("dictate"),
         run: toggle,
       }),
     })
-
-    ctx.add(Command, (): Command => ({
-      id: "toggle",
-      title: ctx.t("command.toggle"),
-      group: ctx.t("command.group"),
-      keywords: "stt speech diktat sprache mikrofon voice transcribe",
-      section: "prompt",
-      bind: "mod+alt+m",
-      editable: true,
-      featured: true,
-      slash: { name: "diktat" },
-      enabled: phase() !== "transcribing",
-      run: () => toggle(),
-    }))
 
     return () => {
       stop()
