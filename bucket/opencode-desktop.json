@@ -12,11 +12,11 @@
         "64bit": {
             "url": [
                 "https://opencode.ai/files/bin/2.2.5/opencode-desktop-win-x64.exe#/dl.7z",
-                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.2.zip"
+                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.3.zip"
             ],
             "hash": [
                 "634cd9b3b0e6dea71285dc4ed98d54d6617721d5e302bc8c8661fc957c321cc8",
-                "8c5ad7d3a72ab05951e99aa1b71af8bbb9a4d39d88cca3d09243b195a0c3b1d6"
+                "057e66c0d10ecc82a9b6b620aa9c49e7d26eda828306fdd3726377b0900626f4"
             ],
             "extract_to": [
                 "",
@@ -75,7 +75,7 @@
             "64bit": {
                 "url": [
                     "https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z",
-                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.2.zip"
+                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.0.3.zip"
                 ]
             }
         }

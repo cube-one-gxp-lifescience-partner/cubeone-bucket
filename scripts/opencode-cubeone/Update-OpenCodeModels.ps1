@@ -17,6 +17,11 @@ $ErrorActionPreference = 'Stop'
 
 $ProviderId = 'openrouter-zdr'
 $DefaultModel = 'anthropic/claude-sonnet-5.5'
+# OpenRouter's own router model. Not a real model, so it never appears on the ZDR endpoints list;
+# it inherits the provider's zdr=true/data_collection=deny and is additionally pinned with an
+# allowed_models allowlist (set below, after $CuratedModels is resolved) so it can only ever land
+# on one of our vetted ZDR models, never on an unreviewed sibling model from the same provider.
+$AutoRouterModel = 'openrouter/auto'
 $CuratedModels = @(
     'anthropic/claude-opus-5.5'
     'anthropic/claude-sonnet-5.5'
@@ -83,6 +88,33 @@ foreach ($id in $CuratedModels) {
 
 if (-not $models.Contains($DefaultModel)) {
     throw "The default model $DefaultModel did not pass the ZDR check. Pick another default."
+}
+
+$autoRouter = $catalog | Where-Object { $_.id -eq $AutoRouterModel } | Select-Object -First 1
+if (-not $autoRouter) {
+    Write-Warning "$AutoRouterModel is no longer in the OpenRouter catalog and was skipped."
+}
+else {
+    # Minimum context/output across the vetted models so a prompt that fits never overflows
+    # whichever of them the router actually picks.
+    $allowedModels = @($models.Keys)
+    $minContext = ($models.Values | ForEach-Object { $_.limit.context } | Measure-Object -Minimum).Minimum
+    $minOutput = ($models.Values | ForEach-Object { $_.limit.output } | Measure-Object -Minimum).Minimum
+
+    $models[$AutoRouterModel] = [ordered]@{
+        name         = 'Auto (ZDR only)'
+        capabilities = [ordered]@{
+            tools  = $true
+            input  = @('text')
+            output = @('text')
+        }
+        limit        = [ordered]@{ context = [int]$minContext; output = [int]$minOutput }
+        body         = [ordered]@{
+            plugins = @(
+                [ordered]@{ id = 'auto-router'; allowed_models = $allowedModels }
+            )
+        }
+    }
 }
 
 $config = [ordered]@{
