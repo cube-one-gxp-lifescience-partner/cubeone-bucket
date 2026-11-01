@@ -101,19 +101,34 @@ else {
     $minContext = ($models.Values | ForEach-Object { $_.limit.context } | Measure-Object -Minimum).Minimum
     $minOutput = ($models.Values | ForEach-Object { $_.limit.output } | Measure-Object -Minimum).Minimum
 
+    # OpenRouter cost_tier is a band: low is the cheap end, max the most capable.
+    # Each variant repeats the allow-list because OpenCode replaces arrays instead of merging them.
+    $autoBody = {
+        param([string]$Tier)
+        [ordered]@{
+            plugins = @(
+                [ordered]@{
+                    id             = 'auto-router'
+                    allowed_models = @($allowedModels)
+                    cost_tier      = $Tier
+                }
+            )
+        }
+    }
     $models[$AutoRouterModel] = [ordered]@{
-        name         = 'Auto (ZDR only)'
+        name         = 'Auto (ZDR)'
         capabilities = [ordered]@{
             tools  = $true
             input  = @('text')
             output = @('text')
         }
         limit        = [ordered]@{ context = [int]$minContext; output = [int]$minOutput }
-        body         = [ordered]@{
-            plugins = @(
-                [ordered]@{ id = 'auto-router'; allowed_models = $allowedModels }
-            )
-        }
+        body         = & $autoBody 'medium'
+        variants     = @(
+            [ordered]@{ id = 'cost'; body = (& $autoBody 'low') }
+            [ordered]@{ id = 'balanced'; body = (& $autoBody 'medium') }
+            [ordered]@{ id = 'intelligence'; body = (& $autoBody 'max') }
+        )
     }
 }
 

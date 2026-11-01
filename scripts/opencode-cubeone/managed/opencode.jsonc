@@ -519,7 +519,7 @@
           }
         },
         "openrouter/auto": {
-          "name": "Auto (ZDR only)",
+          "name": "Auto (ZDR)",
           "capabilities": {
             "tools": true,
             "input": [
@@ -555,10 +555,103 @@
                   "qwen/qwen3.8-2.4t-a95b",
                   "qwen/qwen3.8-27b",
                   "minimax/minimax-m3"
-                ]
+                ],
+                "cost_tier": "medium"
               }
             ]
-          }
+          },
+          "variants": [
+            {
+              "id": "cost",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "anthropic/claude-opus-5.5",
+                      "anthropic/claude-sonnet-5.5",
+                      "anthropic/claude-haiku-5.5",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
+                      "openai/gpt-6-luna",
+                      "x-ai/grok-4.7",
+                      "mistralai/mistral-large-4-0",
+                      "mistralai/mistral-medium-3-5",
+                      "mistralai/mistral-small-2603",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "moonshotai/kimi-k3.1-pro",
+                      "z-ai/glm-5.3",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "minimax/minimax-m3"
+                    ],
+                    "cost_tier": "low"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "balanced",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "anthropic/claude-opus-5.5",
+                      "anthropic/claude-sonnet-5.5",
+                      "anthropic/claude-haiku-5.5",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
+                      "openai/gpt-6-luna",
+                      "x-ai/grok-4.7",
+                      "mistralai/mistral-large-4-0",
+                      "mistralai/mistral-medium-3-5",
+                      "mistralai/mistral-small-2603",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "moonshotai/kimi-k3.1-pro",
+                      "z-ai/glm-5.3",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "minimax/minimax-m3"
+                    ],
+                    "cost_tier": "medium"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "intelligence",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "anthropic/claude-opus-5.5",
+                      "anthropic/claude-sonnet-5.5",
+                      "anthropic/claude-haiku-5.5",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
+                      "openai/gpt-6-luna",
+                      "x-ai/grok-4.7",
+                      "mistralai/mistral-large-4-0",
+                      "mistralai/mistral-medium-3-5",
+                      "mistralai/mistral-small-2603",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "moonshotai/kimi-k3.1-pro",
+                      "z-ai/glm-5.3",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "minimax/minimax-m3"
+                    ],
+                    "cost_tier": "max"
+                  }
+                ]
+              }
+            }
+          ]
         }
       }
     }
