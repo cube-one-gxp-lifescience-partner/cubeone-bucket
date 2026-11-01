@@ -1,5 +1,5 @@
-import { createSignal } from "solid-js"
-import { ComposerPill, Plugin, type ComposerPillView } from "@opencode/plugin/gui"
+import { createSignal, Show } from "solid-js"
+import { ComposerPill, Plugin, Slot, type ComposerPillView, type MountedSession } from "@opencode/plugin/gui"
 import { Transcriber } from "./contract"
 import { main } from "./main"
 
@@ -49,6 +49,7 @@ export default Plugin.define({
       "error.send": "Transcript is in the chat box. Press Enter to send it.",
       limit: "Recording stopped after five minutes",
       copied: "Transcript copied to the clipboard",
+      routed: "Model selected by Auto",
     },
     de: {
       dictate: "Diktieren",
@@ -61,6 +62,7 @@ export default Plugin.define({
       "error.send": "Das Transkript steht im Eingabefeld. Mit Enter geht es in den Chat.",
       limit: "Aufnahme nach fünf Minuten beendet",
       copied: "Transkript in die Zwischenablage kopiert",
+      routed: "Von Auto gewähltes Modell",
     },
   },
   setup(ctx) {
@@ -194,6 +196,34 @@ export default Plugin.define({
       if (phase() === "recording") return stop()
       if (phase() === "idle") void start()
     }
+
+    const routedLabel = (session: MountedSession) => {
+      const info = session.server.data.session.get(session.id)
+      if (!info || info.model?.id !== "openrouter/auto") return ""
+      const routed = info.metadata?.routedModel
+      if (typeof routed !== "string" || !routed.includes("/")) return ""
+      const known = session.server.data.location.model.list(session.location)?.find((item) => item.modelID === routed)
+      return known?.name || routed
+    }
+
+    function RoutedModel(props: { session: () => MountedSession }) {
+      const label = () => routedLabel(props.session())
+      return (
+        <Show when={label()}>
+          {(model) => (
+            <span title={ctx.t("routed")} style={{ opacity: "0.72", "font-size": "12px", "line-height": "1.25", "white-space": "nowrap" }}>
+              {model()}
+            </span>
+          )}
+        </Show>
+      )
+    }
+
+    ctx.add(Slot, {
+      at: "session.header",
+      order: 10,
+      render: (input) => <RoutedModel session={() => input.session} />,
+    })
 
     ctx.add(ComposerPill, {
       id: "dictate",

@@ -1,15 +1,17 @@
 {
   "name": "cubeone-stt",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "Speech-to-text for OpenCode Desktop via OpenRouter (EU, Zero Data Retention)",
   "private": true,
   "type": "module",
   "exports": {
-    "./gui-experimental": "./dist/gui-experimental.cjs"
+    "./gui-experimental": "./dist/gui-experimental.cjs",
+    "./server": "./dist/server.js"
   },
   "scripts": {
-    "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "build": "vite build && node script/copy-server.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/routed-model.test.js"
   },
   "devDependencies": {
     "@opencode/plugin": "2.2.5",

@@ -281,7 +281,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'user\opencode.jsonc')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'user\opencode.jsonc')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -296,6 +296,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $pluginTarget 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\package.json') -Destination $pluginTarget
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $pluginTarget 'dist')
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $pluginTarget 'dist')
 
     Install-ManagedConfiguration -Staging $staging -Target (Join-Path $env:ProgramData 'opencode')
 } finally {

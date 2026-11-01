@@ -30,6 +30,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $plugin 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\package.json') -Destination $plugin
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $plugin 'dist')
+    Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $plugin 'dist')
 
     Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $out
 } finally {
