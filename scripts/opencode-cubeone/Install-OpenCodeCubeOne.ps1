@@ -3,8 +3,8 @@
     Deploys the cube one OpenCode configuration.
 
 .DESCRIPTION
-    Machine part (%ProgramData%\opencode): the managed opencode.jsonc, the mandatory rules and the
-    speech-to-text plugin. OpenCode ranks this directory above user and project configuration. The
+    Machine part (%ProgramData%\opencode): the managed opencode.jsonc, the mandatory rules, the
+    path rules (vorgaben) and the cube one plugins. OpenCode ranks this directory above user and project configuration. The
     directory is left writable only for SYSTEM and Administrators.
 
     User part (~\.config\opencode): MCP servers in opencode.jsonc and the optional rules. Existing
@@ -279,6 +279,30 @@ function Install-UserConfiguration {
         }
     }
 
+    # Rules tied to file types. The plugin reads them only when the agent touches a matching file.
+    $vorgabenSource = Join-Path $Source 'vorgaben'
+    $vorgabenTarget = Join-Path $configDir 'vorgaben'
+    New-Item -ItemType Directory -Path $vorgabenTarget -Force | Out-Null
+    foreach ($rule in Get-ChildItem -LiteralPath $vorgabenSource -File) {
+        $destination = Join-Path $vorgabenTarget $rule.Name
+        if (-not (Test-Path -LiteralPath $destination)) {
+            Copy-Item -LiteralPath $rule.FullName -Destination $destination
+            Write-Host "Path rule added: $destination" -ForegroundColor Green
+        }
+    }
+
+    # Until 1.1.4 the design rule was loaded in every session. An unchanged copy goes; an edited one stays and warns.
+    $legacyDesign = Join-Path $rulesTarget 'design.md'
+    if (Test-Path -LiteralPath $legacyDesign) {
+        $legacyHash = (Get-FileHash -LiteralPath $legacyDesign -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($legacyHash -eq '1f836661d53e94d53b4e8ba119401bd8129175461c95ca34c4cf598d456be0c7') {
+            Remove-Item -LiteralPath $legacyDesign -Force
+            Write-Host "Design rule now loads only for UI files: $vorgabenTarget\design.md" -ForegroundColor Green
+        } else {
+            Write-Warning "$legacyDesign was edited and still loads in every session. Move your changes to $vorgabenTarget\design.md and delete it."
+        }
+    }
+
     $memorySource = Join-Path $Source 'opencode-mem.jsonc'
     $memoryTarget = Join-Path $configDir 'opencode-mem.jsonc'
     if ((Test-Path -LiteralPath $memorySource) -and -not (Test-Path -LiteralPath $memoryTarget)) {
@@ -288,7 +312,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'user\opencode.jsonc', 'user\opencode-mem.jsonc')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -299,12 +323,18 @@ try {
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\opencode.jsonc') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\rules') -Destination $staging -Recurse
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\vorgaben') -Destination $staging -Recurse
     $pluginTarget = Join-Path $staging 'cubeone\plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $pluginTarget 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\package.json') -Destination $pluginTarget
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-pty') -Destination (Join-Path $staging 'cubeone\plugins\cubeone-pty') -Recurse
+    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh')) {
+        $target = Join-Path $staging "cubeone\plugins\$name"
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $SourceDir "plugins\$name") -File | Copy-Item -Destination $target
+    }
 
     Install-ManagedConfiguration -Staging $staging -Target (Join-Path $env:ProgramData 'opencode')
 } finally {

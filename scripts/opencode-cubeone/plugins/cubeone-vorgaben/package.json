@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-vorgaben",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: attaches a company rule only to the files it is about",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/vorgaben.test.js"
+  }
+}

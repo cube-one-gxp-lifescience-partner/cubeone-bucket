@@ -1,6 +1,6 @@
 // Managed by the cubeone-bucket opencode-desktop manifest. Do not edit on the machine.
 // Regenerate with scripts\opencode-cubeone\Update-OpenCodeModels.ps1.
-// Model list checked against https://openrouter.ai/api/v1/endpoints/zdr on 2026-11-01. EU endpoints are pinned where one exists.
+// Model list checked against https://openrouter.ai/api/v1/endpoints/zdr on 2026-11-02. EU endpoints are pinned where one exists.
 {
   "$schema": "https://opencode.ai/config.json",
   "update": "disable",
@@ -8,7 +8,7 @@
   "websearch": {
     "provider": "cubeone-zdr"
   },
-  "model": "openrouter-zdr/anthropic/claude-sonnet-5.5",
+  "model": "openrouter-zdr/~anthropic/claude-sonnet-latest",
   "providers": {
     "openrouter-zdr": {
       "name": "OpenRouter (ZDR)",
@@ -30,8 +30,8 @@
         }
       },
       "models": {
-        "anthropic/claude-opus-5.5": {
-          "name": "Claude Opus 5.5",
+        "~anthropic/claude-opus-latest": {
+          "name": "Claude Opus Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -71,8 +71,8 @@
             "output": 22.0
           }
         },
-        "anthropic/claude-sonnet-5.5": {
-          "name": "Claude Sonnet 5.5",
+        "~anthropic/claude-sonnet-latest": {
+          "name": "Claude Sonnet Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -112,8 +112,8 @@
             "output": 11.0
           }
         },
-        "anthropic/claude-haiku-5.5": {
-          "name": "Claude Haiku 5.5",
+        "~anthropic/claude-haiku-latest": {
+          "name": "Claude Haiku Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -153,8 +153,8 @@
             "output": 0.55
           }
         },
-        "openai/gpt-6.1-sol": {
-          "name": "GPT-6.1 Sol",
+        "~openai/gpt-sol-latest": {
+          "name": "GPT Sol Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -193,8 +193,8 @@
             "output": 11.0
           }
         },
-        "openai/gpt-6.1-terra": {
-          "name": "GPT-6.1 Terra",
+        "~openai/gpt-terra-latest": {
+          "name": "GPT Terra Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -233,8 +233,8 @@
             "output": 6.0
           }
         },
-        "openai/gpt-6-luna": {
-          "name": "GPT-6 Luna",
+        "~openai/gpt-luna-latest": {
+          "name": "GPT Luna Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -273,8 +273,8 @@
             "output": 0.55
           }
         },
-        "x-ai/grok-4.7": {
-          "name": "Grok 4.7",
+        "~x-ai/grok-latest": {
+          "name": "Grok Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -422,8 +422,8 @@
             "output": 0.66
           }
         },
-        "deepseek/deepseek-v4-pro-0813": {
-          "name": "DeepSeek V4 Pro 0813",
+        "~deepseek/deepseek-pro-latest": {
+          "name": "DeepSeek Pro Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -450,8 +450,8 @@
             "output": 4.0
           }
         },
-        "deepseek/deepseek-v4.1-flash-1017": {
-          "name": "DeepSeek V4.1 Flash 1017",
+        "~deepseek/deepseek-flash-latest": {
+          "name": "DeepSeek Flash Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -508,8 +508,8 @@
             "output": 10.0
           }
         },
-        "z-ai/glm-5.3": {
-          "name": "GLM 5.3",
+        "~z-ai/glm-latest": {
+          "name": "GLM Latest",
           "capabilities": {
             "tools": true,
             "input": [
@@ -653,15 +653,15 @@
               {
                 "id": "auto-router",
                 "allowed_models": [
+                  "anthropic/claude-haiku-5.5",
                   "anthropic/claude-opus-5.5",
                   "anthropic/claude-sonnet-5.5",
-                  "anthropic/claude-haiku-5.5",
-                  "openai/gpt-6.1-sol",
-                  "openai/gpt-6.1-terra",
-                  "openai/gpt-6-luna",
                   "mistralai/mistral-large-4-0",
                   "mistralai/mistral-medium-3-5",
                   "mistralai/mistral-small-2603",
+                  "openai/gpt-6-luna",
+                  "openai/gpt-6.1-sol",
+                  "openai/gpt-6.1-terra",
                   "z-ai/glm-5.3"
                 ],
                 "cost_tier": "medium"
@@ -689,15 +689,15 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
+                      "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "anthropic/claude-haiku-5.5",
-                      "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "openai/gpt-6-luna",
                       "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
                       "mistralai/mistral-small-2603",
+                      "openai/gpt-6-luna",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
                       "z-ai/glm-5.3"
                     ],
                     "cost_tier": "low"
@@ -725,15 +725,15 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
+                      "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "anthropic/claude-haiku-5.5",
-                      "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "openai/gpt-6-luna",
                       "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
                       "mistralai/mistral-small-2603",
+                      "openai/gpt-6-luna",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
                       "z-ai/glm-5.3"
                     ],
                     "cost_tier": "medium"
@@ -761,15 +761,15 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
+                      "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "anthropic/claude-haiku-5.5",
-                      "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "openai/gpt-6-luna",
                       "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
                       "mistralai/mistral-small-2603",
+                      "openai/gpt-6-luna",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
                       "z-ai/glm-5.3"
                     ],
                     "cost_tier": "max"
@@ -831,7 +831,7 @@
     "orchestrator": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "anthropic/claude-opus-5.5"
+        "model": "~anthropic/claude-opus-latest"
       },
       "mode": "primary",
       "description": "Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.",
@@ -872,7 +872,7 @@
     "architect": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "anthropic/claude-opus-5.5"
+        "model": "~anthropic/claude-opus-latest"
       },
       "mode": "subagent",
       "description": "Design, interfaces, data models and trade-offs for one question. Read-only.",
@@ -898,7 +898,7 @@
     "researcher": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "openai/gpt-6-luna"
+        "model": "~openai/gpt-luna-latest"
       },
       "mode": "subagent",
       "description": "Current external facts with sources via zero-data-retention web search. Read-only.",
@@ -939,7 +939,7 @@
     "developer": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "anthropic/claude-sonnet-5.5"
+        "model": "~anthropic/claude-sonnet-latest"
       },
       "mode": "subagent",
       "description": "Implements one work package of an approved plan, including its tests.",
@@ -960,7 +960,7 @@
     "quick": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "anthropic/claude-haiku-5.5"
+        "model": "~anthropic/claude-haiku-latest"
       },
       "mode": "subagent",
       "description": "Small mechanical changes: renames, boilerplate, formatting, simple tests.",
@@ -981,7 +981,7 @@
     "reviewer": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "openai/gpt-6.1-sol"
+        "model": "~openai/gpt-sol-latest"
       },
       "mode": "subagent",
       "description": "Independent review of a finished work package against the plan; runs tests and the build. Read-only.",
@@ -1016,7 +1016,7 @@
         "endpoint": "https://eu.openrouter.ai/api/v1",
         "model": "mistralai/voxtral-mini-transcribe-3-0",
         "search": true,
-        "search_model": "openai/gpt-6-luna",
+        "search_model": "~openai/gpt-luna-latest",
         "search_endpoint": "azure/eu"
       }
     },
@@ -1037,6 +1037,22 @@
         "port": 0,
         "autostart": false
       }
+    },
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-vorgaben",
+      "options": {
+        "dirs": [
+          "C:/ProgramData/opencode/vorgaben",
+          "~/.config/opencode/vorgaben"
+        ],
+        "gate": true
+      }
+    },
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp"
+    },
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh"
     },
     "@tarquinen/opencode-dcp@3.2.0",
     "opencode-mem@2.39.0"

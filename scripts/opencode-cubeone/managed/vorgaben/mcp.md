@@ -1,3 +1,8 @@
+---
+titel: MCP-Server
+pfade:
+  - "**/*mcp*"
+---
 # MCP-Server
 
 HTTP und stdio sind zwei Transporte derselben Rollenprüfung. HTTP-Clients nutzen nur `https://<anwendung>/mcp`. `python -m <paket>.mcp` bleibt stdio und bindet keinen Port. Der Server ist dieselbe Anwendung, mit demselben Icon. Es gibt kein zweites API und keine eigene Datenbank.

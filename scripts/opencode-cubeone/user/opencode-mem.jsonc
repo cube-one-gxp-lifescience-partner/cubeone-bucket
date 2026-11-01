@@ -4,7 +4,7 @@
   // Embeddings run on this machine. The web view binds to loopback only.
   "webServerHost": "127.0.0.1",
   "opencodeProvider": "openrouter-zdr",
-  "opencodeModel": "anthropic/claude-haiku-5.5",
+  "opencodeModel": "~anthropic/claude-haiku-latest",
   "embeddingModel": "Xenova/all-MiniLM-L6-v2",
   "embeddingIdleTimeoutMs": 600000,
   "chatMessage": {

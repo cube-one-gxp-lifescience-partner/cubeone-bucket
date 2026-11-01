@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-ssh",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: makes hosts from the local SSH config known to the agent",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/ssh.test.js"
+  }
+}

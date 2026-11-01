@@ -1,3 +1,8 @@
+---
+titel: Design
+pfade:
+  - "**/*.{tsx,vue,svelte,css}"
+---
 # Icons
 
 Phosphor ist der Icon-Satz für Buttons, Navigation, leere Zustände und Status. Eine ausdrückliche andere Vorgabe gilt vorrangig.

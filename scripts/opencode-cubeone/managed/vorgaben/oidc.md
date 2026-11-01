@@ -1,3 +1,10 @@
+---
+titel: OIDC
+pfade:
+  - "**/*auth*"
+  - "**/*oidc*"
+  - "**/*oauth*"
+---
 # OIDC
 
 Anwendungen müssen mindestens OIDC via Keycloak unterstützen, falls nicht schon implementiert oder falls keine Benutzeranmeldung vorgesehen ist.

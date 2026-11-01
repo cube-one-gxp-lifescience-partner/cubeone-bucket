@@ -1,0 +1,14 @@
+{
+  "name": "cubeone-mcp",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: shows which MCP servers are signed in before the first task",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./gui-experimental": "./gui-experimental.cjs",
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/mcp.test.js"
+  }
+}

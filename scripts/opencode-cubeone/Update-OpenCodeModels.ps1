@@ -10,6 +10,10 @@
     Where such an endpoint is in Europe, the model is pinned to those endpoints and its price is the
     price of the cheapest one among them. A model without a European endpoint keeps OpenRouter's
     published price and is not region-pinned.
+    A curated id that starts with ~ is an OpenRouter latest alias. The request keeps that alias, so a
+    new release is picked up without editing this list. Zero Data Retention, the EU pin and the price
+    are taken from the concrete model the alias points at today. Auto's allow-list stays on those
+    concrete ids, because the router matches concrete slugs, not aliases.
 #>
 [CmdletBinding()]
 param(
@@ -19,27 +23,31 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $ProviderId = 'openrouter-zdr'
-$DefaultModel = 'anthropic/claude-sonnet-5.5'
+$DefaultModel = '~anthropic/claude-sonnet-latest'
 # OpenRouter's own router model. Not a real model, so it never appears on the ZDR endpoints list;
 # it inherits the provider's zdr=true/data_collection=deny and is additionally pinned with an
 # allowed_models allowlist (set below, after $CuratedModels is resolved) so it can only ever land
 # on one of our vetted ZDR models, never on an unreviewed sibling model from the same provider.
 $AutoRouterModel = 'openrouter/auto'
+# ~author/family-latest follows the newest model of that family. Families without such an alias, and
+# Kimi, stay on a concrete id: ~moonshotai/kimi-latest currently points at kimi-k3, which is older
+# than kimi-k3.1-pro. ~deepseek/deepseek-v4-flash-latest points at the older July snapshot, so the
+# flash line uses ~deepseek/deepseek-flash-latest.
 $CuratedModels = @(
-    'anthropic/claude-opus-5.5'
-    'anthropic/claude-sonnet-5.5'
-    'anthropic/claude-haiku-5.5'
-    'openai/gpt-6.1-sol'
-    'openai/gpt-6.1-terra'
-    'openai/gpt-6-luna'
-    'x-ai/grok-4.7'
+    '~anthropic/claude-opus-latest'
+    '~anthropic/claude-sonnet-latest'
+    '~anthropic/claude-haiku-latest'
+    '~openai/gpt-sol-latest'
+    '~openai/gpt-terra-latest'
+    '~openai/gpt-luna-latest'
+    '~x-ai/grok-latest'
     'mistralai/mistral-large-4-0'
     'mistralai/mistral-medium-3-5'
     'mistralai/mistral-small-2603'
-    'deepseek/deepseek-v4-pro-0813'
-    'deepseek/deepseek-v4.1-flash-1017'
+    '~deepseek/deepseek-pro-latest'
+    '~deepseek/deepseek-flash-latest'
     'moonshotai/kimi-k3.1-pro'
-    'z-ai/glm-5.3'
+    '~z-ai/glm-latest'
     'qwen/qwen3.8-2.4t-a95b'
     'qwen/qwen3.8-27b'
     'minimax/minimax-m3.1-flash'
@@ -47,7 +55,7 @@ $CuratedModels = @(
 
 # Web search runs as the provider's native search on one pinned ZDR endpoint. OpenRouter's own
 # search engines (Exa, Parallel, Perplexity) are outside ZDR and unavailable on eu.openrouter.ai.
-$SearchModel = 'openai/gpt-6-luna'
+$SearchModel = '~openai/gpt-luna-latest'
 $SearchEndpoint = 'azure/eu'
 $WebSearchProvider = 'cubeone-zdr'
 # Pinned: OpenCode installs plugin packages from npm at startup.
@@ -63,7 +71,7 @@ $ReadOnly = @(
 )
 $Agents = [ordered]@{
     orchestrator = [ordered]@{
-        model       = 'anthropic/claude-opus-5.5'
+        model       = '~anthropic/claude-opus-latest'
         mode        = 'primary'
         description = 'Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.'
         permissions = @(
@@ -76,7 +84,7 @@ $Agents = [ordered]@{
         )
     }
     architect    = [ordered]@{
-        model       = 'anthropic/claude-opus-5.5'
+        model       = '~anthropic/claude-opus-latest'
         mode        = 'subagent'
         description = 'Design, interfaces, data models and trade-offs for one question. Read-only.'
         permissions = $ReadOnly
@@ -95,7 +103,7 @@ $Agents = [ordered]@{
         )
     }
     developer    = [ordered]@{
-        model       = 'anthropic/claude-sonnet-5.5'
+        model       = '~anthropic/claude-sonnet-latest'
         mode        = 'subagent'
         description = 'Implements one work package of an approved plan, including its tests.'
         permissions = @(
@@ -104,7 +112,7 @@ $Agents = [ordered]@{
         )
     }
     quick        = [ordered]@{
-        model       = 'anthropic/claude-haiku-5.5'
+        model       = '~anthropic/claude-haiku-latest'
         mode        = 'subagent'
         description = 'Small mechanical changes: renames, boilerplate, formatting, simple tests.'
         permissions = @(
@@ -113,7 +121,7 @@ $Agents = [ordered]@{
         )
     }
     reviewer     = [ordered]@{
-        model       = 'openai/gpt-6.1-sol'
+        model       = '~openai/gpt-sol-latest'
         mode        = 'subagent'
         description = 'Independent review of a finished work package against the plan; runs tests and the build. Read-only.'
         permissions = $ReadOnly
@@ -144,30 +152,36 @@ $catalog = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/models' -Header
 $zdrEndpoints = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/endpoints/zdr' -Headers $headers).data
 
 $models = [ordered]@{}
+$concreteOf = @{}
 foreach ($id in $CuratedModels) {
     $model = $catalog | Where-Object { $_.id -eq $id } | Select-Object -First 1
     if (-not $model) {
         Write-Warning "$id is no longer in the OpenRouter catalog and was skipped."
         continue
     }
+    # An alias has no own endpoints. ZDR and the EU pin come from the model it points at today.
+    $concrete = if ($model.alias_target.slug) { [string]$model.alias_target.slug } else { $id }
+    $concreteOf[$id] = $concrete
+    $served = if ($concrete -eq $id) { $model } else { $catalog | Where-Object { $_.id -eq $concrete } | Select-Object -First 1 }
+    if (-not $served) { $served = $model }
     $endpoints = @($zdrEndpoints | Where-Object {
-            $_.model_id -eq $id -and -not $_.safety_retention -and ($_.supported_parameters -contains 'tools')
+            $_.model_id -eq $concrete -and -not $_.safety_retention -and ($_.supported_parameters -contains 'tools')
         })
     if ($endpoints.Count -eq 0) {
-        Write-Warning "$id has no strict ZDR endpoint with tool support and was skipped."
+        Write-Warning "$id ($concrete) has no strict ZDR endpoint with tool support and was skipped."
         continue
     }
 
-    $modalities = @($model.architecture.input_modalities | Where-Object { $_ -in @('text', 'image') })
+    $modalities = @($served.architecture.input_modalities | Where-Object { $_ -in @('text', 'image') })
     $capabilities = [ordered]@{
         tools  = $true
         input  = $modalities
         output = @('text')
     }
-    if ($model.supported_parameters -contains 'reasoning') {
+    if ($served.supported_parameters -contains 'reasoning') {
         $capabilities.reasoning = [ordered]@{ supported = $true; effort = @('low', 'medium', 'high') }
     }
-    $output = [int]($model.top_provider.max_completion_tokens)
+    $output = [int]($served.top_provider.max_completion_tokens)
     if ($output -le 0) {
         $output = 32000
     }
@@ -179,7 +193,7 @@ foreach ($id in $CuratedModels) {
     $entry = [ordered]@{
         name         = ($model.name -replace '^[^:]+:\s*', '')
         capabilities = $capabilities
-        limit        = [ordered]@{ context = [int]$model.context_length; output = $output }
+        limit        = [ordered]@{ context = [int]$served.context_length; output = $output }
     }
     if ($eu.Count -gt 0) {
         $full = @($eu | Where-Object { -not (Test-QuantizedEndpoint $_) })
@@ -200,13 +214,13 @@ foreach ($id in $CuratedModels) {
     }
     else {
         $entry.cost = [ordered]@{
-            input  = [math]::Round([double]$model.pricing.prompt * 1e6, 4)
-            output = [math]::Round([double]$model.pricing.completion * 1e6, 4)
+            input  = [math]::Round([double]$served.pricing.prompt * 1e6, 4)
+            output = [math]::Round([double]$served.pricing.completion * 1e6, 4)
         }
     }
     $models[$id] = $entry
     $where = if ($eu.Count -gt 0) { ($entry.body.provider.only -join ',') } else { 'zdr' }
-    Write-Host ("{0}  {1}/{2}  {3}" -f $id, $entry.cost.input, $entry.cost.output, $where)
+    Write-Host ("{0}  ->  {1}  {2}/{3}  {4}" -f $id, $concrete, $entry.cost.input, $entry.cost.output, $where)
 }
 
 if (-not $models.Contains($DefaultModel)) {
@@ -220,17 +234,20 @@ if (-not $autoRouter) {
 else {
     # Auto is one request, so it cannot carry a different EU pin per child model.
     # It therefore only offers models that have an EU endpoint, and the request itself
-    # is pinned to the union of those endpoints.
-    $allowedModels = @($models.Keys | Where-Object { $null -ne $models[$_].body.provider.only })
-    if ($allowedModels.Count -eq 0) {
+    # is pinned to the union of those endpoints. The router matches concrete slugs, so the
+    # allow-list is the model each alias points at today, not the alias itself.
+    $euKeys = @($models.Keys | Where-Object { $null -ne $models[$_].body.provider.only })
+    if ($euKeys.Count -eq 0) {
         Write-Warning 'No model has an EU endpoint. Auto keeps the full ZDR list without a region pin.'
-        $allowedModels = @($models.Keys)
+        $allowedModels = @($models.Keys | ForEach-Object { $concreteOf[$_] })
         $euOnly = @()
+        $autoModels = @($models.Values)
     }
     else {
-        $euOnly = @($allowedModels | ForEach-Object { $models[$_].body.provider.only } | Sort-Object -Unique)
+        $allowedModels = @($euKeys | ForEach-Object { $concreteOf[$_] } | Sort-Object -Unique)
+        $euOnly = @($euKeys | ForEach-Object { $models[$_].body.provider.only } | Sort-Object -Unique)
+        $autoModels = @($euKeys | ForEach-Object { $models[$_] })
     }
-    $autoModels = @($allowedModels | ForEach-Object { $models[$_] })
     $minContext = ($autoModels | ForEach-Object { $_.limit.context } | Measure-Object -Minimum).Minimum
     $minOutput = ($autoModels | ForEach-Object { $_.limit.output } | Measure-Object -Minimum).Minimum
 
@@ -275,8 +292,9 @@ else {
     }
 }
 
+$searchConcrete = if ($concreteOf.ContainsKey($SearchModel)) { $concreteOf[$SearchModel] } else { $SearchModel }
 $searchReady = @($zdrEndpoints | Where-Object {
-        $_.model_id -eq $SearchModel -and $_.tag -eq $SearchEndpoint -and -not $_.safety_retention -and
+        $_.model_id -eq $searchConcrete -and $_.tag -eq $SearchEndpoint -and -not $_.safety_retention -and
         $_.native_tools -and $_.native_tools.'openrouter:web_search'
     }).Count -gt 0
 if (-not $searchReady) {
@@ -333,6 +351,7 @@ $config = [ordered]@{
         [ordered]@{ action = 'integration.use'; resource = 'mcp_*'; effect = 'allow' }
     )
     agents       = $agentConfig
+    # Rules that hold in every session. Rules tied to file types live in vorgaben\ and come from cubeone-vorgaben.
     instructions = @(
         'C:/ProgramData/opencode/rules/*.md'
         '~/.config/opencode/rules/optional/*.md'
@@ -363,6 +382,20 @@ $config = [ordered]@{
                 port      = 0
                 autostart = $false
             }
+        }
+        # Managed folder first: a user file cannot replace a managed rule of the same name.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-vorgaben'
+            options = [ordered]@{
+                dirs = @('C:/ProgramData/opencode/vorgaben', '~/.config/opencode/vorgaben')
+                gate = $true
+            }
+        }
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp'
+        }
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh'
         }
         $ContextPruningPackage
         $MemoryPackage
