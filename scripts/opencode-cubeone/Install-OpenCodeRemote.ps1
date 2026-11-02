@@ -14,7 +14,10 @@ param(
     [string]$ProfilePath = $env:USERPROFILE,
     [switch]$SkipWsl,
     [switch]$SkipSsh,
-    [switch]$DesktopOnly
+    [switch]$DesktopOnly,
+    # Limits the SSH part to one host alias from ~/.ssh/config. Used by cubeone-ssh for a single,
+    # on-demand or background setup instead of a full company-wide run.
+    [string]$OnlyHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -148,11 +151,17 @@ function New-LinuxPayload {
 
 function Send-File {
     param([string]$Exe, [string]$Arguments, [string]$InputPath, [string]$UserProfile)
+    # Piping $InputPath through .NET's Process.StandardInput corrupts it: that property lazily builds
+    # a StreamWriter with AutoFlush=true, and merely touching it flushes a 3-byte UTF-8 BOM to the pipe
+    # before any byte we write ourselves lands - breaking the tar.gz transfer (invalid gzip), the
+    # OpenRouter key file (3 garbage bytes prepended) and the first line of every shell script sent
+    # this way. cmd.exe's own "<" redirection is a raw OS file-handle redirect and never touches that
+    # encoder, so route the whole call through it instead of RedirectStandardInput.
+    $cmdLine = "$Exe $Arguments < `"$InputPath`""
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Exe
-    $psi.Arguments = $Arguments
+    $psi.FileName = 'cmd.exe'
+    $psi.Arguments = "/d /c `"$cmdLine`""
     $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
@@ -161,13 +170,6 @@ function Send-File {
         $psi.Environment['HOME'] = $UserProfile
     }
     $process = [System.Diagnostics.Process]::Start($psi)
-    $stream = [System.IO.File]::OpenRead($InputPath)
-    try {
-        $stream.CopyTo($process.StandardInput.BaseStream)
-    } finally {
-        $stream.Dispose()
-        $process.StandardInput.Close()
-    }
     $stdout = $process.StandardOutput.ReadToEnd()
     $stderr = $process.StandardError.ReadToEnd()
     $process.WaitForExit()
@@ -252,19 +254,46 @@ fi
 printf 'installed %s\n' "$ROOT"
 '@
 
+# Installs the official OpenCode CLI (the same binary the desktop app runs as its remote server) when
+# a Linux target does not have it yet, so a freshly added SSH host needs no manual setup. Uses the
+# company's passwordless-sudo pattern, the same one install.sh above already relies on, to also put
+# the binary on the default non-interactive PATH (/usr/local/bin), which is where the desktop app looks
+# for it over a plain `ssh host command` call. A CPU that is too old for Bun (missing SSE4.2, common on
+# a QEMU/KVM VM without host CPU passthrough) fails here with that exact message instead of silently
+# leaving the host unusable.
+$cliInstallSh = @'
+#!/bin/bash
+set -eu
+if command -v opencode >/dev/null 2>&1; then
+    echo "opencode already present: $(command -v opencode)"
+    exit 0
+fi
+curl -fsSL https://opencode.ai/v2/install | bash
+if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n install -m 755 "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode
+fi
+command -v opencode
+'@
+
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-remote-' + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $work 'payload'
 $tar = Join-Path $work 'cubeone-opencode.tgz'
 $keyFile = Join-Path $work 'openrouter.key'
 $scriptFile = Join-Path $work 'install.sh'
+$cliInstallFile = Join-Path $work 'install-cli.sh'
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 try {
-    Register-DesktopSshHosts -ProfilePath $ProfilePath
+    # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
+    # has no business touching the desktop's full server list or WSL.
+    if (-not $OnlyHost) {
+        Register-DesktopSshHosts -ProfilePath $ProfilePath
+    }
     if ($DesktopOnly) { return }
     New-LinuxPayload -Source $SourceDir -Destination $payload
     $scriptText = $installSh -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($scriptFile, $scriptText, $utf8)
+    [System.IO.File]::WriteAllText($cliInstallFile, ($cliInstallSh -replace "`r`n", "`n"), $utf8)
     if (Test-Path -LiteralPath $tar) { Remove-Item -LiteralPath $tar -Force }
     & tar.exe -czf $tar -C $payload .
     if ($LASTEXITCODE -ne 0) { throw "tar failed with exit $LASTEXITCODE" }
@@ -278,7 +307,7 @@ try {
     }
 
     $ok = 0
-    if (-not $SkipWsl) {
+    if (-not $SkipWsl -and -not $OnlyHost) {
     foreach ($distro in @(Get-WslDistros)) {
         try {
             # -u root reaches /etc/opencode without a sudo password. The key stays in the distro user's home.
@@ -311,7 +340,9 @@ try {
 
     $sshConfig = Join-Path $ProfilePath '.ssh\config'
     if (-not $SkipSsh) {
-    foreach ($sshHost in @(Get-SshHosts -ConfigPath $sshConfig)) {
+    $sshTargets = @(Get-SshHosts -ConfigPath $sshConfig)
+    if ($OnlyHost) { $sshTargets = @($sshTargets | Where-Object { $_ -eq $OnlyHost }) }
+    foreach ($sshHost in $sshTargets) {
         $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
         try {
             $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $keyFile -UserProfile $ProfilePath
@@ -320,9 +351,16 @@ try {
                 Write-Warning "SSH ${sshHost}: skipped, not a reachable Linux host."
                 continue
             }
-            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs cat > /tmp/cubeone-opencode.tgz" -InputPath $tar -UserProfile $ProfilePath
+            # The desktop app runs the remote server as a plain `ssh host opencode ...`, so the CLI has
+            # to exist on the default, non-interactive PATH before anything else here helps.
+            $cli = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $cliInstallFile -UserProfile $ProfilePath
+            Invoke-Checked $cli "opencode CLI on SSH $sshHost"
+            Write-Host "SSH ${sshHost}: $($cli.Out.Trim())" -ForegroundColor Green
+            # Quoted so cmd.exe (Send-File's local redirection shell) leaves the ">" for the remote
+            # shell instead of redirecting ssh's own stdout into a local file named /tmp/... .
+            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-opencode.tgz`"" -InputPath $tar -UserProfile $ProfilePath
             Invoke-Checked $recv "Copy to SSH $sshHost"
-            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs cat > /tmp/cubeone-openrouter.key" -InputPath $keyFile -UserProfile $ProfilePath
+            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile -UserProfile $ProfilePath
             Invoke-Checked $recv "Key file to SSH $sshHost"
             $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $scriptFile -UserProfile $ProfilePath
             Invoke-Checked $recv "Install on SSH $sshHost"

@@ -324,6 +324,10 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\opencode.jsonc') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\rules') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\vorgaben') -Destination $staging -Recurse
+    # cubeone-ssh calls this by a fixed path (three levels above its own plugin folder) to set up a
+    # reachable SSH target that is still missing the opencode CLI. Keeping a copy in the locked,
+    # version-independent ProgramData tree means that path survives a Scoop update of the app itself.
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'Install-OpenCodeRemote.ps1') -Destination $staging
     $pluginTarget = Join-Path $staging 'cubeone\plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $pluginTarget 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\package.json') -Destination $pluginTarget

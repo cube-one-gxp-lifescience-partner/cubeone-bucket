@@ -336,6 +336,7 @@ Prüfe die GitLab-Pipelines für das Repository im aktuellen Arbeitsverzeichnis 
 Zusatz vom Benutzer: $ARGUMENTS
 '@ -replace "`r`n", "`n"
 $TicketCommand = 'Lade das Redmine-Ticket $ARGUMENTS mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung.'
+$SshSetupCommand = 'Richte OpenCode auf dem SSH-Ziel $ARGUMENTS mit dem Werkzeug ssh_einrichten ein. Melde kurz das Ergebnis.'
 
 $config = [ordered]@{
     '$schema'    = 'https://opencode.ai/config.json'
@@ -380,6 +381,10 @@ $config = [ordered]@{
         ticket   = [ordered]@{
             description = 'Redmine-Ticket laden und bearbeiten, z. B. /ticket 1234'
             template    = $TicketCommand
+        }
+        'ssh-einrichten' = [ordered]@{
+            description = 'OpenCode auf einem SSH-Ziel aus ~/.ssh/config jetzt einrichten, z. B. /ssh-einrichten coding-vm-2'
+            template    = $SshSetupCommand
         }
     }
     agents       = $agentConfig

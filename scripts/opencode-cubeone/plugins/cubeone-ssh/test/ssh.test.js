@@ -92,12 +92,13 @@ test("plugin appends the note to the session system prompt", async () => {
   try {
     let hook
     const ctx = {
-      options: { configPath },
+      options: { configPath, autoSetup: false },
       session: {
         hook: async (name, cb) => {
           if (name === "context") hook = cb
         },
       },
+      tool: { transform: async () => {} },
     }
     await plugin.setup(ctx)
     const input = { sessionID: "s1", system: [{ type: "text", text: "base" }] }
@@ -109,15 +110,71 @@ test("plugin appends the note to the session system prompt", async () => {
   }
 })
 
+function withPlatform(value, run) {
+  const original = Object.getOwnPropertyDescriptor(process, "platform")
+  Object.defineProperty(process, "platform", { value })
+  try {
+    return run()
+  } finally {
+    Object.defineProperty(process, "platform", original)
+  }
+}
+
+test("on a Linux target the plugin registers no setup tool and no auto-setup check", () =>
+  withPlatform("linux", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "cubeone-ssh-test-"))
+    writeFileSync(path.join(dir, "config"), "Host coding-vm-2\n    HostName 192.168.10.249\n")
+    try {
+      let hook
+      let toolTransformCalled = false
+      const ctx = {
+        options: { configPath: path.join(dir, "config") },
+        session: { hook: async (_name, cb) => (hook = cb) },
+        tool: { transform: async () => (toolTransformCalled = true) },
+      }
+      await plugin.setup(ctx)
+      await hook({ sessionID: "s1", system: [] })
+      assert.equal(toolTransformCalled, false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }))
+
+test("on Windows the plugin offers ssh_einrichten and reports an unknown host in German", () =>
+  withPlatform("win32", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "cubeone-ssh-test-"))
+    writeFileSync(path.join(dir, "config"), "Host coding-vm-2\n    HostName 192.168.10.249\n")
+    try {
+      let hook
+      let tool
+      const ctx = {
+        options: { configPath: path.join(dir, "config"), autoSetup: false },
+        session: { hook: async (_name, cb) => (hook = cb) },
+        tool: {
+          transform: async (callback) => {
+            callback({ add: (definition) => (tool = definition) })
+          },
+        },
+      }
+      await plugin.setup(ctx)
+      await hook({ sessionID: "s1", system: [] })
+      assert.equal(tool.name, "ssh_einrichten")
+      await assert.rejects(() => tool.execute({ ziel: "nope" }), /Fehler: "nope"/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }))
+
 test("plugin stays silent when the config file is missing", async () => {
   let hook
   const ctx = {
-    options: { configPath: path.join(os.tmpdir(), "cubeone-ssh-test-missing-" + Date.now()) },
+    options: { configPath: path.join(os.tmpdir(), "cubeone-ssh-test-missing-" + Date.now()), autoSetup: false },
     session: {
       hook: async (name, cb) => {
         if (name === "context") hook = cb
       },
     },
+    tool: { transform: async () => {} },
   }
   await plugin.setup(ctx)
   const input = { sessionID: "s1", system: [] }
