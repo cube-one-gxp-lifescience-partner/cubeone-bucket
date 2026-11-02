@@ -839,7 +839,7 @@
   ],
   "mcp": {
     "servers": {
-      "gitlab": {
+      "cube-git": {
         "type": "remote",
         "url": "https://git.cubeone.de/api/v4/mcp"
       }
@@ -847,12 +847,12 @@
   },
   "commands": {
     "pipeline": {
-      "description": "GitLab-Pipelines dieses Repositorys prüfen und Fehler beheben",
-      "template": "Prüfe die GitLab-Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server gitlab.\n\n1. Ermittle das Projekt aus `git remote get-url origin` (Pfad auf git.cubeone.de) und den aktuellen Branch.\n2. Zeige die letzten Pipelines dieses Branches mit list_pipelines: Nummer, Status, Commit, Zeit.\n3. Ist die neueste fehlgeschlagen, hole mit get_pipeline (include jobs, job_status failed) die fehlgeschlagenen Jobs und mit get_job (include log, from end) das Ende ihrer Logs.\n4. Nenne die Ursache und die Stelle im Code. Behebe den Fehler im lokalen Repository und prüfe die Änderung lokal, soweit möglich.\n5. Committe und pushe erst nach meiner Bestätigung. Danach kannst du die Pipeline mit save_pipeline neu starten.\n\nZusatz vom Benutzer: $ARGUMENTS"
+      "description": "Pipelines dieses Repositorys in cube git prüfen und Fehler beheben",
+      "template": "Prüfe die Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server cube-git.\n\n1. Ermittle das Projekt aus `git remote get-url origin` (Pfad auf git.cubeone.de) und den aktuellen Branch.\n2. Zeige die letzten Pipelines dieses Branches mit list_pipelines: Nummer, Status, Commit, Zeit.\n3. Ist die neueste fehlgeschlagen, hole mit get_pipeline (include jobs, job_status failed) die fehlgeschlagenen Jobs und mit get_job (include log, from end) das Ende ihrer Logs.\n4. Nenne die Ursache und die Stelle im Code. Behebe den Fehler im lokalen Repository und prüfe die Änderung lokal, soweit möglich.\n5. Committe und pushe erst nach meiner Bestätigung. Danach kannst du die Pipeline mit save_pipeline neu starten.\n\nZusatz vom Benutzer: $ARGUMENTS"
     },
     "ticket": {
-      "description": "Redmine-Ticket laden und bearbeiten, z. B. /ticket 1234",
-      "template": "Lade das Redmine-Ticket $ARGUMENTS mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung."
+      "description": "Ticket aus cube project laden und bearbeiten, z. B. /ticket 1234",
+      "template": "Lade das Ticket $ARGUMENTS aus cube project mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung."
     },
     "ssh-einrichten": {
       "description": "OpenCode auf einem SSH-Ziel aus ~/.ssh/config jetzt einrichten, z. B. /ssh-einrichten coding-vm-2",
@@ -1038,8 +1038,7 @@
     }
   },
   "instructions": [
-    "C:/ProgramData/opencode/rules/*.md",
-    "~/.config/opencode/rules/optional/*.md"
+    "C:/ProgramData/opencode/rules/*.md"
   ],
   "plugins": [
     {
@@ -1077,7 +1076,10 @@
           "C:/ProgramData/opencode/vorgaben",
           "~/.config/opencode/vorgaben"
         ],
-        "gate": true
+        "gate": true,
+        "rulesMandatory": "C:/ProgramData/opencode/rules",
+        "rulesOptional": "~/.config/opencode/rules/optional",
+        "disabledFile": "~/.config/opencode/vorgaben-deaktiviert.json"
       }
     },
     {

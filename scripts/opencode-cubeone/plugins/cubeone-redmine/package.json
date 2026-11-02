@@ -1,7 +1,7 @@
 {
   "name": "cubeone-redmine",
   "version": "1.0.0",
-  "description": "cube one OpenCode plugin: Redmine sign-in via OAuth and tools that read tickets",
+  "description": "cube one OpenCode plugin: cube project (Redmine) sign-in via OAuth and tools that read tickets",
   "private": true,
   "type": "module",
   "exports": {

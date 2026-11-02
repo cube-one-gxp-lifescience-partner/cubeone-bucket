@@ -13,7 +13,7 @@ export function pkce() {
 
 export function baseUrl(value) {
   const url = new URL(value)
-  if (url.protocol !== "https:") throw new Error("Die Redmine-Adresse muss https verwenden")
+  if (url.protocol !== "https:") throw new Error("Die cube-project-Adresse muss https verwenden")
   return url.origin
 }
 
@@ -86,7 +86,7 @@ function date(value) {
 
 export function formatIssue(issue, base) {
   const lines = [
-    `# Redmine #${issue.id}: ${issue.subject}`,
+    `# cube project #${issue.id}: ${issue.subject}`,
     `${base}/issues/${issue.id}`,
     "",
     `- Projekt: ${name(issue.project)}`,
@@ -167,7 +167,7 @@ export function listQuery(input) {
 }
 
 export const NOTE = [
-  "Redmine ist das Ticketsystem (project.cubeone.de).",
-  "Ein Verweis wie #1234 oder ein Link auf /issues/1234 meint ein Redmine-Ticket, sofern der Benutzer nichts anderes sagt.",
+  "cube project ist das Ticketsystem (project.cubeone.de).",
+  "Ein Verweis wie #1234 oder ein Link auf /issues/1234 meint ein Ticket aus cube project, sofern der Benutzer nichts anderes sagt.",
   "Lies das Ticket mit redmine_ticket, bevor du daran arbeitest. Offene eigene Tickets liefert redmine_tickets.",
 ].join(" ")

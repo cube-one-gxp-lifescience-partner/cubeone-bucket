@@ -8,7 +8,7 @@ const REFRESH_MS = 20_000
 const LOGIN_POLL_MS = 3_000
 const LOGIN_WAIT_MS = 5 * 60_000
 // Integrations registered by cube one server plugins rather than by an MCP server.
-const PLUGIN_INTEGRATIONS = [{ id: "redmine", label: "Redmine", method: "browser" }]
+const PLUGIN_INTEGRATIONS = [{ id: "redmine", label: "cube project", method: "browser" }]
 
 const ROW = {
   connected: { icon: "circle-check", tone: "success", key: "status.connected" },

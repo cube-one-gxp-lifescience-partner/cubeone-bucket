@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./gui-experimental": "./gui-experimental.cjs",
     "./server": "./server.js"
   },
   "scripts": {

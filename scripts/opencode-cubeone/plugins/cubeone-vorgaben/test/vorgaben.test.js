@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
-import plugin, { loadRules } from "../server.js"
-import { applicable, globToRegExp, touched, visibleRules } from "../vorgaben.js"
+import plugin, { loadAlways, loadRules, readDisabled } from "../server.js"
+import { applicable, globToRegExp, parseAlwaysRule, touched, visibleRules } from "../vorgaben.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
 const dirs = [path.join(root, "managed", "vorgaben"), path.join(root, "user", "vorgaben")]
@@ -63,10 +65,10 @@ test("visible rules come from the full block only", () => {
   assert.deepEqual([...visibleRules([{ text: "--- cubeone-vorgabe:oidc | x ---" }, { text: "(cubeone-verweis:design ...)" }])], ["oidc"])
 })
 
-function harness() {
+function harness(extraOptions = {}) {
   const hooks = {}
   const ctx = {
-    options: { dirs },
+    options: { dirs, ...extraOptions },
     location: { directory: project },
     session: {
       get: async () => ({ location: { directory: project } }),
@@ -116,4 +118,83 @@ test("a read appends the rule once, then a reference", async () => {
   const third = read()
   await hooks["execute.after"](third)
   assert.match(third.result.content, /cubeone-vorgabe:oidc/)
+})
+
+test("parseAlwaysRule takes the title from the first heading, else falls back to the id", () => {
+  const withHeading = parseAlwaysRule("kundenrechner", "# Kundenrechner\n\nText.")
+  assert.equal(withHeading.title, "Kundenrechner")
+  assert.match(withHeading.body, /# Kundenrechner/)
+  const withoutHeading = parseAlwaysRule("x", "Nur Text, keine Überschrift.")
+  assert.equal(withoutHeading.title, "x")
+  assert.equal(parseAlwaysRule("leer", "   \n\n  "), undefined)
+})
+
+function tempDir() {
+  return mkdtempSync(path.join(os.tmpdir(), "vorgaben-test-"))
+}
+
+test("loadAlways reads every .md file in the one folder it is given", () => {
+  const dir = tempDir()
+  try {
+    writeFileSync(path.join(dir, "a.md"), "# A\n\nEins.")
+    writeFileSync(path.join(dir, "b.md"), "Zwei, ohne Überschrift.")
+    writeFileSync(path.join(dir, "c.txt"), "wird ignoriert")
+    assert.deepEqual(loadAlways(dir).map((rule) => rule.id).sort(), ["a", "b"])
+    assert.deepEqual(loadAlways(undefined), [])
+    assert.deepEqual(loadAlways(path.join(dir, "fehlt-nicht")), [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("readDisabled lowercases ids and tolerates a missing or broken file", () => {
+  const dir = tempDir()
+  try {
+    const file = path.join(dir, "deaktiviert.json")
+    writeFileSync(file, JSON.stringify({ disabled: ["Design", "paketinstallation"] }))
+    assert.deepEqual([...readDisabled(file)].sort(), ["design", "paketinstallation"])
+    assert.deepEqual(readDisabled(path.join(dir, "fehlt.json")), new Set())
+    assert.deepEqual(readDisabled(undefined), new Set())
+    writeFileSync(file, "kein json")
+    assert.deepEqual(readDisabled(file), new Set())
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("an always rule reaches the system prompt every turn, and a disabled one does not", async () => {
+  const alwaysDir = tempDir()
+  const stateDir = tempDir()
+  const disabledFile = path.join(stateDir, "deaktiviert.json")
+  try {
+    writeFileSync(path.join(alwaysDir, "kundenrechner.md"), "# Kundenrechner\n\nNichts Verdächtiges auf WKS-Rechnern.")
+    const { ctx, hooks } = harness({ rulesOptional: alwaysDir, disabledFile })
+    await plugin.setup(ctx)
+    const on = { sessionID: "always-on", messages: [] }
+    await hooks.context(on)
+    assert.match(on.system[0].text, /Kundenrechner/)
+
+    writeFileSync(disabledFile, JSON.stringify({ disabled: ["kundenrechner"] }))
+    const off = { sessionID: "always-off", messages: [] }
+    await hooks.context(off)
+    assert.equal(off.system, undefined)
+  } finally {
+    rmSync(alwaysDir, { recursive: true, force: true })
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})
+
+test("a managed vorgabe cannot be disabled even if its id appears in the disabled file", async () => {
+  const dir = tempDir()
+  const disabledFile = path.join(dir, "deaktiviert.json")
+  try {
+    writeFileSync(disabledFile, JSON.stringify({ disabled: ["oidc"] }))
+    const { ctx, hooks } = harness({ disabledFile })
+    await plugin.setup(ctx)
+    const call = { tool: "write", sessionID: "guard", input: { path: path.join(project, "src/auth/callback.ts"), content: "x" } }
+    await hooks.context({ sessionID: "guard", messages: [] })
+    await assert.rejects(hooks["execute.before"](call), /cubeone-vorgabe:oidc/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

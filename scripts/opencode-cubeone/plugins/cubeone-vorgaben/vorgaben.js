@@ -12,6 +12,17 @@ function unquote(value) {
   return text
 }
 
+/** Parses a rule that holds in every session, unconditionally: title from the first `# Überschrift`, else the file name. */
+export function parseAlwaysRule(id, source) {
+  const text = source
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+  if (!text) return undefined
+  const heading = /^#\s+(.+)$/m.exec(text)
+  return { id, title: heading ? heading[1].trim() : id, body: text }
+}
+
 /** Parses a rule file: a small front matter with `titel`, `pfade` (list) and `inhalt` (regex), then the rule text. */
 export function parseRule(id, source) {
   const text = source.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")

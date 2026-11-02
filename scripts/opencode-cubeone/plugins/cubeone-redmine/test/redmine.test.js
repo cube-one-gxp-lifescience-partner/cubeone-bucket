@@ -65,7 +65,7 @@ test("formatIssue renders the parts the agent needs", () => {
     },
     BASE,
   )
-  assert.match(text, /# Redmine #5: Login kaputt/)
+  assert.match(text, /# cube project #5: Login kaputt/)
   assert.match(text, /project\.cubeone\.de\/issues\/5/)
   assert.match(text, /- \[x\] Repro/)
   assert.match(text, /Kommentare \(1 von 1\)/)
@@ -115,7 +115,7 @@ test("plugin registers the integration, three tools and the context note", async
 test("tools refuse without sign-in and send the bearer token when signed in", async () => {
   const signedOut = fakeCtx()
   await plugin.setup(signedOut.ctx)
-  await assert.rejects(signedOut.registered.tools[0].execute({ ticket: "5" }, {}), /Fehler: Nicht bei Redmine angemeldet/)
+  await assert.rejects(signedOut.registered.tools[0].execute({ ticket: "5" }, {}), /Fehler: Nicht bei cube project angemeldet/)
 
   const signedIn = fakeCtx({ type: "oauth", access: "tok", refresh: "r", expires: Date.now() + 1000 })
   await plugin.setup(signedIn.ctx)
@@ -127,7 +127,7 @@ test("tools refuse without sign-in and send the bearer token when signed in", as
   }
   try {
     const result = await signedIn.registered.tools[0].execute({ ticket: "#5" }, {})
-    assert.match(result.content, /Redmine #5: S/)
+    assert.match(result.content, /cube project #5: S/)
     assert.equal(calls[0][1], "Bearer tok")
     assert.match(calls[0][0], /\/issues\/5\.json\?include=/)
   } finally {

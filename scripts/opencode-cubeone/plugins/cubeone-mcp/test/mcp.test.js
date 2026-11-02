@@ -88,7 +88,7 @@ test("the pill lists each server and opens the browser for a login", async () =>
   const lab = view.rows.find((row) => row.label === "LAB11")
   assert.equal(lab.detail, "Anmeldung nötig")
   assert.equal(view.rows.find((row) => row.label === "cube-note").detail, "angemeldet")
-  assert.equal(view.rows.find((row) => row.label === "Redmine").detail, "nicht angemeldet")
+  assert.equal(view.rows.find((row) => row.label === "cube project").detail, "nicht angemeldet")
   assert.equal(toasts[0].title, "MCP-Anmeldung nötig")
   assert.equal(toasts[0].description, "LAB11")
 
@@ -101,7 +101,7 @@ test("the pill lists each server and opens the browser for a login", async () =>
   cleanup()
 })
 
-test("the Redmine row signs in with the plugin's browser method", async () => {
+test("the cube project row signs in with the plugin's browser method", async () => {
   const gui = loadGui()
   const added = []
   const opened = []
@@ -135,7 +135,7 @@ test("the Redmine row signs in with the plugin's browser method", async () => {
   })
   added[0].show({ session })
   await new Promise((resolve) => setTimeout(resolve, 20))
-  const row = added[0].show({ session }).rows.find((item) => item.label === "Redmine")
+  const row = added[0].show({ session }).rows.find((item) => item.label === "cube project")
   row.run()
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.deepEqual(calls, [["redmine", "browser"]])

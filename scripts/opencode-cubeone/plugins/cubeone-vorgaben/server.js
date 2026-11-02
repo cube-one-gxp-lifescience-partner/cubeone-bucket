@@ -6,6 +6,7 @@ import {
   WRITING_TOOLS,
   applicable,
   fullBlock,
+  parseAlwaysRule,
   parseRule,
   referenceBlock,
   resultText,
@@ -44,6 +45,39 @@ export function loadRules(dirs) {
   return [...rules.values()]
 }
 
+/** Rules that hold in every session, regardless of file. Just one folder: there is no managed/optional override here. */
+export function loadAlways(dir) {
+  if (!dir) return []
+  const base = expand(dir)
+  let names
+  try {
+    names = readdirSync(base).filter((name) => name.toLowerCase().endsWith(".md")).sort()
+  } catch {
+    return []
+  }
+  const rules = []
+  for (const name of names) {
+    try {
+      const rule = parseAlwaysRule(name.slice(0, -3).toLowerCase(), readFileSync(path.join(base, name), "utf8"))
+      if (rule) rules.push(rule)
+    } catch {
+      continue
+    }
+  }
+  return rules
+}
+
+/** Ids disabled from the Richtlinien GUI. Missing, unreadable or malformed files just mean nothing is disabled. */
+export function readDisabled(file) {
+  if (!file) return new Set()
+  try {
+    const data = JSON.parse(readFileSync(expand(file), "utf8"))
+    return new Set((Array.isArray(data?.disabled) ? data.disabled : []).map((id) => String(id).toLowerCase()))
+  } catch {
+    return new Set()
+  }
+}
+
 function stamp(dirs) {
   return dirs
     .map(expand)
@@ -64,7 +98,12 @@ export default {
   async setup(ctx) {
     const dirs = Array.isArray(ctx.options?.dirs) ? ctx.options.dirs.filter((dir) => typeof dir === "string") : []
     const gate = ctx.options?.gate !== false
+    const rulesOptional = typeof ctx.options?.rulesOptional === "string" ? ctx.options.rulesOptional : undefined
+    const disabledFile = typeof ctx.options?.disabledFile === "string" ? ctx.options.disabledFile : undefined
+
     let rules = loadRules(dirs)
+    // A vorgabe can only be disabled if it is not also managed: the first folder in dirs always wins.
+    let mandatoryIds = new Set(loadRules(dirs.slice(0, 1)).map((rule) => rule.id))
     let loadedStamp = stamp(dirs)
     let checkedAt = Date.now()
     const currentRules = () => {
@@ -74,9 +113,28 @@ export default {
         if (next !== loadedStamp) {
           loadedStamp = next
           rules = loadRules(dirs)
+          mandatoryIds = new Set(loadRules(dirs.slice(0, 1)).map((rule) => rule.id))
         }
       }
-      return rules
+      const disabled = readDisabled(disabledFile)
+      return disabled.size ? rules.filter((rule) => mandatoryIds.has(rule.id) || !disabled.has(rule.id)) : rules
+    }
+
+    let always = loadAlways(rulesOptional)
+    let alwaysStamp = rulesOptional ? stamp([rulesOptional]) : ""
+    let alwaysCheckedAt = Date.now()
+    const currentAlways = () => {
+      if (!rulesOptional) return []
+      if (Date.now() - alwaysCheckedAt > RELOAD_MS) {
+        alwaysCheckedAt = Date.now()
+        const next = stamp([rulesOptional])
+        if (next !== alwaysStamp) {
+          alwaysStamp = next
+          always = loadAlways(rulesOptional)
+        }
+      }
+      const disabled = readDisabled(disabledFile)
+      return disabled.size ? always.filter((rule) => !disabled.has(rule.id)) : always
     }
 
     const sessions = new Map()
@@ -101,6 +159,9 @@ export default {
       const state = stateOf(input.sessionID)
       state.visible = visibleRules(input.messages)
       state.shown.clear()
+      // Every session, fresh from disk each time: an off switch in the GUI takes effect on the very next message.
+      const active = currentAlways()
+      if (active.length) input.system = [...(input.system ?? []), { type: "text", text: active.map((rule) => rule.body).join("\n\n") }]
     })
 
     // A first change to a file whose rule the model has not seen yet does not run. The error carries the rule, so

@@ -325,7 +325,7 @@ if (-not $searchReady) {
 }
 
 $PipelineCommand = @'
-Prüfe die GitLab-Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server gitlab.
+Prüfe die Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server cube-git.
 
 1. Ermittle das Projekt aus `git remote get-url origin` (Pfad auf git.cubeone.de) und den aktuellen Branch.
 2. Zeige die letzten Pipelines dieses Branches mit list_pipelines: Nummer, Status, Commit, Zeit.
@@ -335,7 +335,7 @@ Prüfe die GitLab-Pipelines für das Repository im aktuellen Arbeitsverzeichnis 
 
 Zusatz vom Benutzer: $ARGUMENTS
 '@ -replace "`r`n", "`n"
-$TicketCommand = 'Lade das Redmine-Ticket $ARGUMENTS mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung.'
+$TicketCommand = 'Lade das Ticket $ARGUMENTS aus cube project mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung.'
 $SshSetupCommand = 'Richte OpenCode auf dem SSH-Ziel $ARGUMENTS mit dem Werkzeug ssh_einrichten ein. Melde kurz das Ergebnis.'
 
 $config = [ordered]@{
@@ -367,19 +367,19 @@ $config = [ordered]@{
         [ordered]@{ action = 'integration.connect'; resource = 'redmine'; effect = 'allow' }
         [ordered]@{ action = 'integration.use'; resource = 'redmine'; effect = 'allow' }
     )
-    # GitLab's own MCP server: OAuth with dynamic client registration, pipelines, jobs and logs.
+    # GitLab's own MCP server (branded "cube git"): OAuth with dynamic client registration, pipelines, jobs and logs.
     mcp          = [ordered]@{
         servers = [ordered]@{
-            gitlab = [ordered]@{ type = 'remote'; url = 'https://git.cubeone.de/api/v4/mcp' }
+            'cube-git' = [ordered]@{ type = 'remote'; url = 'https://git.cubeone.de/api/v4/mcp' }
         }
     }
     commands     = [ordered]@{
         pipeline = [ordered]@{
-            description = 'GitLab-Pipelines dieses Repositorys prüfen und Fehler beheben'
+            description = 'Pipelines dieses Repositorys in cube git prüfen und Fehler beheben'
             template    = $PipelineCommand
         }
         ticket   = [ordered]@{
-            description = 'Redmine-Ticket laden und bearbeiten, z. B. /ticket 1234'
+            description = 'Ticket aus cube project laden und bearbeiten, z. B. /ticket 1234'
             template    = $TicketCommand
         }
         'ssh-einrichten' = [ordered]@{
@@ -388,10 +388,11 @@ $config = [ordered]@{
         }
     }
     agents       = $agentConfig
-    # Rules that hold in every session. Rules tied to file types live in vorgaben\ and come from cubeone-vorgaben.
+    # Mandatory rules that hold in every session. The optional counterpart (rules/optional) and rules tied to
+    # file types (vorgaben\) are loaded and injected by cubeone-vorgaben instead, so they can be listed and the
+    # optional ones toggled from the Richtlinien GUI without a restart.
     instructions = @(
         'C:/ProgramData/opencode/rules/*.md'
-        '~/.config/opencode/rules/optional/*.md'
     )
     plugins      = @(
         [ordered]@{
@@ -424,8 +425,11 @@ $config = [ordered]@{
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-vorgaben'
             options = [ordered]@{
-                dirs = @('C:/ProgramData/opencode/vorgaben', '~/.config/opencode/vorgaben')
-                gate = $true
+                dirs           = @('C:/ProgramData/opencode/vorgaben', '~/.config/opencode/vorgaben')
+                gate           = $true
+                rulesMandatory = 'C:/ProgramData/opencode/rules'
+                rulesOptional  = '~/.config/opencode/rules/optional'
+                disabledFile   = '~/.config/opencode/vorgaben-deaktiviert.json'
             }
         }
         [ordered]@{
