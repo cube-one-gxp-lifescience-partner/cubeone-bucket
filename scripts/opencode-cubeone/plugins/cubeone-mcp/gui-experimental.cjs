@@ -7,6 +7,8 @@ const { ComposerPill, Plugin } = require("@opencode/plugin/gui")
 const REFRESH_MS = 20_000
 const LOGIN_POLL_MS = 3_000
 const LOGIN_WAIT_MS = 5 * 60_000
+// Integrations registered by cube one server plugins rather than by an MCP server.
+const PLUGIN_INTEGRATIONS = [{ id: "redmine", label: "Redmine", method: "browser" }]
 
 const ROW = {
   connected: { icon: "circle-check", tone: "success", key: "status.connected" },
@@ -20,6 +22,22 @@ function message(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Sign-in state of the plugin integrations this server knows; unknown ones are left out. */
+async function pluginIntegrations(client, location) {
+  const found = await Promise.all(
+    PLUGIN_INTEGRATIONS.map(async (item) => {
+      try {
+        const integration = (await client.integration.get({ integrationID: item.id, location }))?.data
+        if (!integration) return undefined
+        return { ...item, connected: (integration.connections ?? []).length > 0 }
+      } catch {
+        return undefined
+      }
+    }),
+  )
+  return found.filter(Boolean)
+}
+
 exports.default = Plugin.define({
   i18n: {
     en: {
@@ -31,6 +49,7 @@ exports.default = Plugin.define({
       "status.failed": "unreachable",
       "status.pending": "starting",
       "status.disabled": "off",
+      "status.signed_out": "not signed in",
       none: "No MCP servers configured",
       refresh: "Check again",
       "toast.title": "MCP sign-in needed",
@@ -49,6 +68,7 @@ exports.default = Plugin.define({
       "status.failed": "nicht erreichbar",
       "status.pending": "startet",
       "status.disabled": "aus",
+      "status.signed_out": "nicht angemeldet",
       none: "Keine MCP-Server eingerichtet",
       refresh: "Neu prüfen",
       "toast.title": "MCP-Anmeldung nötig",
@@ -93,9 +113,11 @@ exports.default = Plugin.define({
       if (loading.has(key)) return
       loading.add(key)
       try {
-        const listed = await session.server.client.mcp.list({ location: { directory: session.directory } })
+        const location = { directory: session.directory }
+        const listed = await session.server.client.mcp.list({ location })
         const servers = listed?.data ?? []
-        store(key, { servers, at: Date.now() })
+        const integrations = await pluginIntegrations(session.server.client, location)
+        store(key, { servers, integrations, at: Date.now() })
         warn(session, key, servers)
       } catch (error) {
         store(key, { servers: [], error: message(error), at: Date.now() })
@@ -124,6 +146,28 @@ exports.default = Plugin.define({
           const now = states().get(keyOf(session))?.servers.find((item) => item.name === name)
           if (now?.status.status === "connected") {
             ctx.toast.show({ variant: "success", title: ctx.t("login.done"), description: server.title || name })
+            return
+          }
+        }
+      } catch (error) {
+        ctx.toast.show({ variant: "error", title: ctx.t("login.failed"), description: message(error) })
+      }
+    }
+
+    const loginIntegration = async (session, item) => {
+      const client = session.server.client
+      const location = { directory: session.directory }
+      try {
+        const attempt = await client.integration.oauth.connect({ integrationID: item.id, methodID: item.method, location })
+        ctx.system.openExternal(attempt.data.url)
+        ctx.toast.show({ title: ctx.t("login.started"), description: item.label, icon: "lock" })
+        const until = Date.now() + LOGIN_WAIT_MS
+        while (Date.now() < until && !ctx.signal.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL_MS))
+          await refresh(session)
+          const now = states().get(keyOf(session))?.integrations?.find((entry) => entry.id === item.id)
+          if (now?.connected) {
+            ctx.toast.show({ variant: "success", title: ctx.t("login.done"), description: item.label })
             return
           }
         }
@@ -180,6 +224,16 @@ exports.default = Plugin.define({
                   : undefined,
           }
         })
+        for (const item of state.integrations ?? []) {
+          rows.push({
+            id: `integration:${item.id}`,
+            label: item.label,
+            icon: item.connected ? ROW.connected.icon : ROW.needs_auth.icon,
+            tone: item.connected ? ROW.connected.tone : undefined,
+            detail: item.connected ? ctx.t(ROW.connected.key) : ctx.t("status.signed_out"),
+            run: item.connected ? undefined : () => void loginIntegration(session, item),
+          })
+        }
         if (!rows.length) rows.push({ id: "none", label: ctx.t("none"), icon: "mcp" })
         rows.push({ id: "refresh", label: ctx.t("refresh"), icon: "refresh", run: () => void refresh(session) })
         return { label: `${ctx.t("pill")} ${connected}/${enabled.length}`, icon: "mcp", tone, title: ctx.t("title"), rows }

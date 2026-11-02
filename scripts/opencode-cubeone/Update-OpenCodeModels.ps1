@@ -324,6 +324,19 @@ if (-not $searchReady) {
     $agentConfig.orchestrator.permissions = @($agentConfig.orchestrator.permissions | Where-Object { $_.resource -ne 'researcher' })
 }
 
+$PipelineCommand = @'
+Prüfe die GitLab-Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server gitlab.
+
+1. Ermittle das Projekt aus `git remote get-url origin` (Pfad auf git.cubeone.de) und den aktuellen Branch.
+2. Zeige die letzten Pipelines dieses Branches mit list_pipelines: Nummer, Status, Commit, Zeit.
+3. Ist die neueste fehlgeschlagen, hole mit get_pipeline (include jobs, job_status failed) die fehlgeschlagenen Jobs und mit get_job (include log, from end) das Ende ihrer Logs.
+4. Nenne die Ursache und die Stelle im Code. Behebe den Fehler im lokalen Repository und prüfe die Änderung lokal, soweit möglich.
+5. Committe und pushe erst nach meiner Bestätigung. Danach kannst du die Pipeline mit save_pipeline neu starten.
+
+Zusatz vom Benutzer: $ARGUMENTS
+'@ -replace "`r`n", "`n"
+$TicketCommand = 'Lade das Redmine-Ticket $ARGUMENTS mit redmine_ticket. Fasse Ziel, Akzeptanzkriterien und offene Fragen kurz zusammen und schlage einen Umsetzungsplan für dieses Repository vor. Beginne mit der Umsetzung erst nach meiner Bestätigung.'
+
 $config = [ordered]@{
     '$schema'    = 'https://opencode.ai/config.json'
     update       = 'disable'
@@ -349,7 +362,26 @@ $config = [ordered]@{
         [ordered]@{ action = 'integration.use'; resource = $ProviderId; effect = 'allow' }
         # OpenCode registers every remote MCP server with OAuth as integration mcp_<sha1>.
         [ordered]@{ action = 'integration.use'; resource = 'mcp_*'; effect = 'allow' }
+        # Registered by the cubeone-redmine plugin; plugin integrations need both actions, MCP ones only use.
+        [ordered]@{ action = 'integration.connect'; resource = 'redmine'; effect = 'allow' }
+        [ordered]@{ action = 'integration.use'; resource = 'redmine'; effect = 'allow' }
     )
+    # GitLab's own MCP server: OAuth with dynamic client registration, pipelines, jobs and logs.
+    mcp          = [ordered]@{
+        servers = [ordered]@{
+            gitlab = [ordered]@{ type = 'remote'; url = 'https://git.cubeone.de/api/v4/mcp' }
+        }
+    }
+    commands     = [ordered]@{
+        pipeline = [ordered]@{
+            description = 'GitLab-Pipelines dieses Repositorys prüfen und Fehler beheben'
+            template    = $PipelineCommand
+        }
+        ticket   = [ordered]@{
+            description = 'Redmine-Ticket laden und bearbeiten, z. B. /ticket 1234'
+            template    = $TicketCommand
+        }
+    }
     agents       = $agentConfig
     # Rules that hold in every session. Rules tied to file types live in vorgaben\ and come from cubeone-vorgaben.
     instructions = @(
@@ -396,6 +428,14 @@ $config = [ordered]@{
         }
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh'
+        }
+        # Public OAuth client (PKCE, read-only scopes) registered under Administration > Applications.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-redmine'
+            options = [ordered]@{
+                url      = 'https://project.cubeone.de'
+                clientId = 'TIq0UQ2DABBw02Chl2_oe-Z743kLlb4zrKLrB65G0GA'
+            }
         }
         $ContextPruningPackage
         $MemoryPackage

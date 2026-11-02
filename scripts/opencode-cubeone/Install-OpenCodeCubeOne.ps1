@@ -312,7 +312,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'plugins\cubeone-redmine\server.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -330,7 +330,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-pty') -Destination (Join-Path $staging 'cubeone\plugins\cubeone-pty') -Recurse
-    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh')) {
+    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh', 'cubeone-redmine')) {
         $target = Join-Path $staging "cubeone\plugins\$name"
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $SourceDir "plugins\$name") -File | Copy-Item -Destination $target

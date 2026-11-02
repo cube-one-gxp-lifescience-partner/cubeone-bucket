@@ -88,13 +88,58 @@ test("the pill lists each server and opens the browser for a login", async () =>
   const lab = view.rows.find((row) => row.label === "LAB11")
   assert.equal(lab.detail, "Anmeldung nötig")
   assert.equal(view.rows.find((row) => row.label === "cube-note").detail, "angemeldet")
+  assert.equal(view.rows.find((row) => row.label === "Redmine").detail, "nicht angemeldet")
   assert.equal(toasts[0].title, "MCP-Anmeldung nötig")
   assert.equal(toasts[0].description, "LAB11")
 
+  calls.length = 0
   lab.run()
   await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.deepEqual(calls, [["get", "mcp_1"], ["connect", "m1"]])
+  assert.deepEqual(calls.slice(0, 2), [["get", "mcp_1"], ["connect", "m1"]])
   assert.deepEqual(opened, ["https://lab11.cubeone.de/oauth/authorize?x"])
+  controller.abort()
+  cleanup()
+})
+
+test("the Redmine row signs in with the plugin's browser method", async () => {
+  const gui = loadGui()
+  const added = []
+  const opened = []
+  const calls = []
+  let connected = false
+  const client = {
+    mcp: { list: async () => ({ data: [] }) },
+    integration: {
+      get: async (input) => {
+        if (input.integrationID !== "redmine") throw new Error("unknown")
+        return { data: { id: "redmine", methods: [{ id: "browser", type: "oauth" }], connections: connected ? [{ id: "c1" }] : [] } }
+      },
+      oauth: {
+        connect: async (input) => {
+          calls.push([input.integrationID, input.methodID])
+          connected = true
+          return { data: { url: "https://project.cubeone.de/oauth/authorize?x" } }
+        },
+      },
+    },
+  }
+  const session = { server: { id: "sidecar", client }, directory: "C:/p" }
+  const controller = new AbortController()
+  const cleanup = gui.setup({
+    t: (key) => gui.i18n.de[key] ?? key,
+    add: (_registry, value) => added.push(value),
+    toast: { show: () => {} },
+    system: { openExternal: (url) => opened.push(url) },
+    sessions: { current: () => session },
+    signal: controller.signal,
+  })
+  added[0].show({ session })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const row = added[0].show({ session }).rows.find((item) => item.label === "Redmine")
+  row.run()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.deepEqual(calls, [["redmine", "browser"]])
+  assert.deepEqual(opened, ["https://project.cubeone.de/oauth/authorize?x"])
   controller.abort()
   cleanup()
 })
