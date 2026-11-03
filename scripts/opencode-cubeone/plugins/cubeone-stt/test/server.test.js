@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import plugin, { searchResults } from "../src/server.js"
+import plugin, { parseRegistryValue, searchResults } from "../src/server.js"
 
 function fakeContext(metadata = {}) {
   const hooks = {}
@@ -36,6 +36,17 @@ function fakeContext(metadata = {}) {
   }
   return { ctx, hooks, updates }
 }
+
+test("parseRegistryValue reads one registry value and nothing around it", () => {
+  const output = [
+    "HKEY_LOCAL_MACHINE\\SOFTWARE\\cubeone\\OpenCode",
+    "    OpenRouterApiKey    REG_SZ    sk-or-v1-example",
+    "",
+  ].join("\r\n")
+  assert.equal(parseRegistryValue(output, "OpenRouterApiKey"), "sk-or-v1-example")
+  assert.equal(parseRegistryValue(output, "Missing"), "")
+  assert.equal(parseRegistryValue("", "OpenRouterApiKey"), "")
+})
 
 test("turns url citations into search results", () => {
   const content = "- **Changelog** — Release notes for 2.2. ([opencode.ai](https://opencode.ai/changelog))\n- **Releases** — Tagged builds. ([github.com](https://github.com/anomalyco/opencode/releases))"

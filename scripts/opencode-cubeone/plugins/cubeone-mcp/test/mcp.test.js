@@ -1,10 +1,16 @@
 import assert from "node:assert/strict"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import Module, { createRequire } from "node:module"
+import http from "node:http"
+import net from "node:net"
+import os from "node:os"
+import path from "node:path"
 import test from "node:test"
-import plugin, { unavailableNote } from "../server.js"
+import { fileURLToPath } from "node:url"
+import plugin, { labelOf, unavailableNote } from "../server.js"
 
 const servers = [
-  { name: "cube-note", status: { status: "connected" } },
+  { name: "cube-note", title: "Outline", status: { status: "connected" } },
   { name: "lab11", title: "LAB11", status: { status: "needs_auth", error: "401" }, integrationID: "mcp_1" },
   { name: "seo-audit", status: { status: "failed", error: "timeout" } },
   { name: "old", status: { status: "disabled" } },
@@ -17,6 +23,9 @@ test("the note names unavailable servers and the login button", () => {
   assert.doesNotMatch(note, /cube-note|old/)
   assert.match(note, /Schaltfläche MCP/)
   assert.equal(unavailableNote([servers[0]]), "")
+  assert.equal(labelOf({ name: "cube-note", title: "Outline" }), "cube note")
+  assert.match(unavailableNote([{ name: "cube-note", title: "Outline", status: { status: "needs_auth" } }]), /cube note \(Anmeldung nötig\)/)
+  assert.doesNotMatch(unavailableNote([{ name: "cube-note", title: "Outline", status: { status: "needs_auth" } }]), /Outline/)
 })
 
 test("the context hook adds the note for the session's directory", async () => {
@@ -32,7 +41,7 @@ test("the context hook adds the note for the session's directory", async () => {
   assert.match(input.system[0].text, /LAB11/)
 })
 
-function loadGui() {
+function loadModule() {
   const original = Module._load
   Module._load = function (request, ...rest) {
     if (request === "solid-js") {
@@ -43,16 +52,21 @@ function loadGui() {
         },
       }
     }
+    if (request === "effect") return { Schema: { String: "String" } }
     if (request === "@opencode/plugin/gui") return { ComposerPill: "ComposerPill", Plugin: { define: (definition) => definition } }
     return original.call(this, request, ...rest)
   }
   try {
     const require = createRequire(import.meta.url)
     delete require.cache[require.resolve("../gui-experimental.cjs")]
-    return require("../gui-experimental.cjs").default
+    return require("../gui-experimental.cjs")
   } finally {
     Module._load = original
   }
+}
+
+function loadGui() {
+  return loadModule().default
 }
 
 test("the pill lists each server and opens the browser for a login", async () => {
@@ -87,7 +101,7 @@ test("the pill lists each server and opens the browser for a login", async () =>
   assert.equal(view.tone, "danger")
   const lab = view.rows.find((row) => row.label === "LAB11")
   assert.equal(lab.detail, "Anmeldung nötig")
-  assert.equal(view.rows.find((row) => row.label === "cube-note").detail, "angemeldet")
+  assert.equal(view.rows.find((row) => row.label === "cube note").detail, "angemeldet")
   assert.equal(view.rows.find((row) => row.label === "cube project").detail, "nicht angemeldet")
   assert.equal(toasts[0].title, "MCP-Anmeldung nötig")
   assert.equal(toasts[0].description, "LAB11")
@@ -142,4 +156,182 @@ test("the cube project row signs in with the plugin's browser method", async () 
   assert.deepEqual(opened, ["https://project.cubeone.de/oauth/authorize?x"])
   controller.abort()
   cleanup()
+})
+
+function freePort() {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address()
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+test("a remote session replays the browser's callback on the server, without a second SSH connection", async () => {
+  const port = await freePort()
+  const order = []
+  const originalLoad = Module._load
+  Module._load = function (request, ...rest) {
+    if (request === "@opencode/plugin/gui/browser") return { Browser: { id: "browser" } }
+    return originalLoad.call(this, request, ...rest)
+  }
+  const url = "https://git.cubeone.de/oauth/authorize?redirect_uri=" + encodeURIComponent(`http://127.0.0.1:${port}/callback`)
+  const module = loadModule()
+  let stopMain = () => {}
+  try {
+    const gui = module.default
+    const added = []
+    const commands = []
+    let connected = false
+    const client = {
+      mcp: {
+        list: async () => ({
+          data: [{ name: "cube-git", title: "cube git", status: { status: connected ? "connected" : "needs_auth" }, integrationID: "mcp_git" }],
+        }),
+      },
+      integration: {
+        get: async () => ({ data: { methods: [{ id: "browser", type: "oauth" }] } }),
+        oauth: { connect: async () => ({ data: { url } }) },
+      },
+      shell: {
+        create: async (input) => (commands.push(input), { data: { id: "sh1", status: "running" } }),
+        get: async () => ((connected = true), { data: { id: "sh1", status: "exited", exit: 0 } }),
+        remove: async () => {},
+      },
+    }
+    const session = { server: { id: "coding-vm-1", client }, directory: "/home/cubeone/app" }
+    const controller = new AbortController()
+    let provided
+    stopMain = gui.main({ provide: (token, impl) => (provided = { token, impl }) })
+    assert.equal(provided.token, module.Callback)
+    const cleanup = gui.setup({
+      main: (token) => {
+        assert.equal(token, module.Callback)
+        return {
+          listen: async (text) => provided.impl.listen(text),
+          wait: async (id) => provided.impl.wait(id),
+          release: async (id) => provided.impl.release(id),
+        }
+      },
+      t: (key) => gui.i18n.de[key] ?? key,
+      add: (_registry, value) => added.push(value),
+      toast: { show: (options) => order.push(["toast", options.title]) },
+      system: { openExternal: (target) => order.push(["system", target]) },
+      sessions: { current: () => session },
+      signal: controller.signal,
+      use: () => () => ({
+        status: "active",
+        value: { canOpen: () => true, open: (_session, target) => order.push(["browser", target]) },
+      }),
+    })
+    added[0].show({ session })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    added[0].show({ session }).rows.find((item) => item.label === "cube git").run()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(order.find((entry) => entry[0] === "browser"), ["browser", url])
+
+    const page = await fetch(`http://127.0.0.1:${port}/callback?code=abc_123&state=xyz-9`)
+    assert.equal(page.status, 200)
+    assert.match(await page.text(), /Anmeldung wird abgeschlossen/)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(commands.length, 1)
+    assert.deepEqual(commands[0].location, { directory: "/home/cubeone/app" })
+    assert.match(commands[0].command, new RegExp(`^curl .*'http://127\\.0\\.0\\.1:${port}/callback\\?code=abc_123&state=xyz-9'`))
+    await assert.rejects(fetch(`http://127.0.0.1:${port}/callback?code=again`))
+
+    controller.abort()
+    cleanup()
+  } finally {
+    stopMain()
+    Module._load = originalLoad
+  }
+})
+
+test("the local listener answers only plain GET callbacks and gives way when the port is taken", async () => {
+  const module = loadModule()
+  const service = module.callbackService()
+  try {
+  assert.equal(await service.listen("0"), "")
+  assert.equal(await service.listen("70000"), "")
+  const port = await freePort()
+  const id = await service.listen(String(port))
+  assert.ok(id)
+  assert.equal(await service.listen(String(port)), "")
+  assert.equal((await fetch(`http://127.0.0.1:${port}/favicon.ico`)).status, 404)
+  const raw = await new Promise((resolve, reject) =>
+    http.get({ host: "127.0.0.1", port, path: "/callback?x='y" }, (response) => resolve(response.statusCode)).on("error", reject),
+  )
+  assert.equal(raw, 404)
+  const pending = service.wait(id)
+  service.release(id)
+  assert.equal(await pending, "")
+  } finally {
+    service.dispose()
+  }
+})
+
+test("relayCommand quotes only plain callback targets", () => {
+  const module = loadModule()
+  assert.equal(
+    module.relayCommand(44637, "/callback?code=a1&state=b2"),
+    "curl -fsS --max-time 20 -o /dev/null 'http://127.0.0.1:44637/callback?code=a1&state=b2' || wget -q -T 20 -O /dev/null 'http://127.0.0.1:44637/callback?code=a1&state=b2'",
+  )
+  assert.equal(module.relayCommand(44637, "/callback?code='x'"), undefined)
+  assert.equal(module.relayCommand(44637, "/callback?code=$(id)"), undefined)
+  assert.equal(module.relayCommand(44637, "callback"), undefined)
+  assert.equal(module.relayCommand(0, "/callback"), undefined)
+})
+test("the settings switch holds the browser open until the SSH forward is listening", async () => {
+  const require = createRequire(import.meta.url)
+  delete require.cache[require.resolve("../gui-experimental.cjs")]
+  const original = Module._load
+  Module._load = function (request, ...rest) {
+    if (request === "solid-js") return { createSignal: (value) => [() => value, () => {}] }
+    if (request === "effect") return { Schema: { String: "String" } }
+    if (request === "@opencode/plugin/gui") return { ComposerPill: "ComposerPill", Plugin: { define: (definition) => definition } }
+    return original.call(this, request, ...rest)
+  }
+  const gui = require("../gui-experimental.cjs")
+  Module._load = original
+  const url = "http://127.0.0.1:44637/callback?code=1"
+  assert.equal(gui.externalUrl({ _tag: "Request", tag: "FilesOpenExternal", payload: { url } }), url)
+  assert.equal(gui.externalUrl({ _tag: "Request", tag: "FilesOpenBrowser", payload: { url } }), url)
+  assert.equal(gui.externalUrl({ _tag: "Request", tag: "FilesSaveFile", payload: { url } }), undefined)
+
+  let release
+  const opened = []
+  const guarded = gui.guardPostMessage((message) => opened.push(message.payload.url), () => new Promise((resolve) => (release = resolve)))
+  guarded.call({}, { _tag: "Request", tag: "FilesOpenExternal", payload: { url } })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.deepEqual(opened, [])
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.deepEqual(opened, [url])
+
+  guarded.call({}, { _tag: "Request", tag: "Other", payload: { url: "https://cubeone.de" } })
+  assert.deepEqual(opened.at(-1), "https://cubeone.de")
+})
+
+test("loopbackPort reads the redirect port and ignores anything that is not a loopback", () => {
+  const gui = loadModule()
+  const url = "https://git.cubeone.de/oauth/authorize?redirect_uri=" + encodeURIComponent("http://127.0.0.1:46739/callback")
+  assert.equal(gui.loopbackPort(url), 46739)
+  assert.equal(gui.loopbackPort("http://127.0.0.1:3000/"), 3000)
+  assert.equal(gui.loopbackPort("http://127.0.0.1/callback"), undefined)
+  assert.equal(gui.loopbackPort("https://git.cubeone.de/oauth/authorize"), undefined)
+  assert.equal(gui.loopbackPort("not a url"), undefined)
+})
+
+test("no GUI bundle requires a sibling file, because the app shares only its own modules", () => {
+  const plugins = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
+  for (const name of readdirSync(plugins)) {
+    let source
+    try {
+      source = readFileSync(path.join(plugins, name, "gui-experimental.cjs"), "utf8")
+    } catch {
+      continue
+    }
+    assert.doesNotMatch(source, /require\(\s*["'`]\.{0,2}\//, name)
+  }
 })

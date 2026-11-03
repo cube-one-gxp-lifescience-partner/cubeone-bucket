@@ -25,6 +25,28 @@ $SidAdministrators = 'S-1-5-32-544'
 $SidUsers = 'S-1-5-32-545'
 $SidOwnerRights = 'S-1-3-4'
 
+function Get-OpenRouterApiKey {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    # Deposited in the registry. The value is never printed.
+    $regBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $regSub = $regBase.OpenSubKey('SOFTWARE\cubeone\OpenCode')
+        if (-not $regSub) { return '' }
+        try {
+            $rawKey = $regSub.GetValue($Name)
+            if ($null -eq $rawKey) { return '' }
+            $apiKey = ([string]$rawKey).Trim()
+            if ($apiKey -match "[\r\n]") { throw "$Name in HKLM\SOFTWARE\cubeone\OpenCode must be a single line." }
+            return $apiKey
+        } finally {
+            $regSub.Close()
+        }
+    } finally {
+        $regBase.Close()
+    }
+}
+
 function Test-IsElevated {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object System.Security.Principal.WindowsPrincipal $identity
@@ -103,6 +125,24 @@ function Invoke-Icacls {
     }
 }
 
+function Invoke-TakeownAdministrators {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    # /D is localized. English Windows accepts Y, German Windows only J. The help text quotes the letter.
+    $help = & takeown.exe /? 2>&1 | Out-String
+    $answer = if ($help -match '"J"') { 'J' } else { 'Y' }
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & takeown.exe /F $Path /R /A /D $answer 2>&1 | Out-Null
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "takeown /F $Path /R /A /D $answer failed with exit $LASTEXITCODE"
+    }
+}
+
 function Protect-ManagedDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -124,6 +164,58 @@ function Protect-ManagedDirectory {
     # The freshly copied files carry only inherited entries, which this one
     # call replaces.
     Invoke-Icacls (@($Path, '/inheritance:r', '/grant:r') + $grants + @("*${SidOwnerRights}:(OI)(CI)(RX)", '/Q'))
+}
+
+function Test-FileLocked {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $stream = [System.IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+        $stream.Dispose()
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+function Sync-ManagedTree {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    $sourceFiles = @(Get-RelativeFiles -Root $Source)
+    $wanted = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in $sourceFiles) { [void]$wanted.Add($file) }
+    $changed = @($sourceFiles | Where-Object {
+            $existing = Join-Path $Target $_
+            -not (Test-Path -LiteralPath $existing -PathType Leaf) -or
+            (Get-FileHash -LiteralPath (Join-Path $Source $_) -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $existing -Algorithm SHA256).Hash
+        })
+    $stale = @(Get-RelativeFiles -Root $Target | Where-Object { -not $wanted.Contains($_) })
+
+    # A running OpenCode keeps native modules such as rust_pty.dll open. Every file that has to change is checked
+    # before the first one is touched, so a locked file cannot leave the tree half replaced.
+    $locked = @(@($changed) + @($stale) | Where-Object { Test-FileLocked -Path (Join-Path $Target $_) })
+    if ($locked.Count -gt 0) {
+        throw "OpenCode is running and keeps files in $Target open ($($locked -join ', ')). Close OpenCode and run the installation again. Nothing was changed."
+    }
+
+    foreach ($file in $changed) {
+        $destination = Join-Path $Target $file
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $Source $file) -Destination $destination -Force
+    }
+    foreach ($file in $stale) {
+        Remove-Item -LiteralPath (Join-Path $Target $file) -Force
+    }
+    Get-ChildItem -LiteralPath $Target -Recurse -Directory -Force |
+        Sort-Object { $_.FullName.Length } -Descending |
+        Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } |
+        Remove-Item -Force
 }
 
 function Test-CanWrite {
@@ -156,18 +248,17 @@ function Install-ManagedConfiguration {
 
     if (Test-Path -LiteralPath $Target) {
         if ($elevated) {
-            $null = & takeown.exe /F $Target /R /A /D Y 2>&1
+            Invoke-TakeownAdministrators -Path $Target
             Invoke-Icacls @($Target, '/grant', "*${SidAdministrators}:(OI)(CI)(F)", '/T', '/C', '/Q')
         } elseif (-not (Test-CanWrite -Path $Target)) {
             Write-Warning "The managed OpenCode configuration in $Target is outdated and locked. Run 'scoop update opencode-desktop --force' as administrator, or let the auto-updater apply it."
             return
         }
-        Get-ChildItem -LiteralPath $Target -Force | Remove-Item -Recurse -Force
     } else {
         New-Item -ItemType Directory -Path $Target -Force | Out-Null
     }
 
-    Copy-Item -Path (Join-Path $Staging '*') -Destination $Target -Recurse -Force
+    Sync-ManagedTree -Source $Staging -Target $Target
     if (-not (Test-TreeEqual -Source $Staging -Target $Target)) {
         throw "Managed OpenCode configuration in $Target does not match the package after copying"
     }
@@ -271,13 +362,12 @@ function Install-UserConfiguration {
     $rulesSource = Join-Path $Source 'rules\optional'
     $rulesTarget = Join-Path $configDir 'rules\optional'
     New-Item -ItemType Directory -Path $rulesTarget -Force | Out-Null
-    foreach ($rule in Get-ChildItem -LiteralPath $rulesSource -File) {
-        $destination = Join-Path $rulesTarget $rule.Name
-        if (-not (Test-Path -LiteralPath $destination)) {
-            Copy-Item -LiteralPath $rule.FullName -Destination $destination
-            Write-Host "Optional rule added: $destination" -ForegroundColor Green
-        }
+    $shipped = @{}
+    foreach ($rule in Get-ChildItem -LiteralPath $rulesSource -File -Filter *.md) {
+        Copy-Item -LiteralPath $rule.FullName -Destination (Join-Path $rulesTarget $rule.Name) -Force
+        $shipped[$rule.Name] = $true
     }
+    Get-ChildItem -LiteralPath $rulesTarget -File -Filter *.md | Where-Object { -not $shipped.ContainsKey($_.Name) } | Remove-Item -Force
 
     # Rules tied to file types. The plugin reads them only when the agent touches a matching file.
     $vorgabenSource = Join-Path $Source 'vorgaben'
@@ -348,13 +438,19 @@ try {
 $targetProfile = Resolve-TargetProfilePath
 Install-UserConfiguration -Source (Join-Path $SourceDir 'user') -ProfilePath $targetProfile
 
-$apiKey = @(
-    $env:OPENROUTER_API_KEY
-    [Environment]::GetEnvironmentVariable('OPENROUTER_API_KEY', 'User')
-    [Environment]::GetEnvironmentVariable('OPENROUTER_API_KEY', 'Machine')
-) | Where-Object { $_ } | Select-Object -First 1
+$apiKey = Get-OpenRouterApiKey -Name 'OpenRouterApiKey'
 if (-not $apiKey) {
-    Write-Warning 'OPENROUTER_API_KEY is not set. OpenCode shows no models and dictation fails until it is set for the user.'
+    Write-Warning 'HKLM\SOFTWARE\cubeone\OpenCode OpenRouterApiKey is not set. OpenCode shows no models until that value exists.'
+} else {
+    Remove-Variable apiKey
+    Write-Host 'OpenRouter key found in HKLM\SOFTWARE\cubeone\OpenCode.'
+}
+$voiceKey = Get-OpenRouterApiKey -Name 'OpenRouterVoiceApiKey'
+if (-not $voiceKey) {
+    Write-Warning 'HKLM\SOFTWARE\cubeone\OpenCode OpenRouterVoiceApiKey is not set. Dictation fails until that value exists.'
+} else {
+    Remove-Variable voiceKey
+    Write-Host 'OpenRouter voice key found in HKLM\SOFTWARE\cubeone\OpenCode.'
 }
 
 $remoteScript = Join-Path $SourceDir 'Install-OpenCodeRemote.ps1'

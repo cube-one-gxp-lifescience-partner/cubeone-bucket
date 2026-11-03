@@ -78,6 +78,29 @@ export function readDisabled(file) {
   }
 }
 
+/** `{ providerID: [modelID, ...] }` from the options. Anything that is not a list of strings is dropped. */
+export function curatedModels(option) {
+  if (!option || typeof option !== "object" || Array.isArray(option)) return {}
+  return Object.fromEntries(
+    Object.entries(option)
+      .filter(([, ids]) => Array.isArray(ids))
+      .map(([providerID, ids]) => [providerID, ids.filter((id) => typeof id === "string")]),
+  )
+}
+
+/**
+ * A user or project config can add models to a managed provider, and policies cannot address single models. Those
+ * models are disabled here. Removing them from the draft is not enough: the provider config adds them back.
+ */
+export function disableUncurated(draft, curated) {
+  for (const [providerID, ids] of Object.entries(curated)) {
+    const allowed = new Set(ids)
+    for (const model of draft.list(providerID) ?? []) {
+      if (!allowed.has(model.id)) draft.update(providerID, model.id, (entry) => (entry.enabled = false))
+    }
+  }
+}
+
 function stamp(dirs) {
   return dirs
     .map(expand)
@@ -100,6 +123,8 @@ export default {
     const gate = ctx.options?.gate !== false
     const rulesOptional = typeof ctx.options?.rulesOptional === "string" ? ctx.options.rulesOptional : undefined
     const disabledFile = typeof ctx.options?.disabledFile === "string" ? ctx.options.disabledFile : undefined
+    const curated = curatedModels(ctx.options?.models)
+    if (Object.keys(curated).length) await ctx.model.transform((draft) => disableUncurated(draft, curated))
 
     let rules = loadRules(dirs)
     // A vorgabe can only be disabled if it is not also managed: the first folder in dirs always wins.

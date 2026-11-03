@@ -66,25 +66,50 @@ export function searchResults(json, limit = MAX_RESULTS) {
 
 let cachedKey = ""
 
-// The desktop server keeps the environment it was started with. A key set afterwards
-// is visible in the registry, the same place the dictation side reads it from.
+export function parseRegistryValue(output, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = new RegExp(`${escaped}\\s+REG_(?:EXPAND_)?SZ\\s+(\\S+)`).exec(String(output ?? ""))
+  return match?.[1]?.trim() ?? ""
+}
+
+function queryRegistry(hive, name) {
+  const args = ["query", hive, "/v", name]
+  if (hive.startsWith("HKLM\\")) args.push("/reg:64")
+  const output = execFileSync("reg.exe", args, {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+  return parseRegistryValue(output, name)
+}
+
+// The desktop server keeps the environment it was started with. The key itself
+// lives in HKLM\SOFTWARE\cubeone\OpenCode, value OpenRouterApiKey.
+function remember(key) {
+  if (!key) return ""
+  cachedKey = key
+  // OpenCode's provider reads this variable from the process. It is not written to disk.
+  process.env.OPENROUTER_API_KEY = key
+  return key
+}
+
 function readApiKey() {
+  if (cachedKey) return remember(cachedKey)
+  if (process.platform === "win32") {
+    try {
+      const fromRegistry = queryRegistry("HKLM\\SOFTWARE\\cubeone\\OpenCode", "OpenRouterApiKey")
+      if (fromRegistry) return remember(fromRegistry)
+    } catch {
+      // The value is simply not there.
+    }
+  }
   const fromEnv = process.env.OPENROUTER_API_KEY?.trim()
-  if (fromEnv) return fromEnv
-  if (cachedKey) return cachedKey
+  if (fromEnv) return remember(fromEnv)
   if (process.platform !== "win32") return ""
   for (const hive of ["HKCU\\Environment", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"]) {
     try {
-      const output = execFileSync("reg.exe", ["query", hive, "/v", "OPENROUTER_API_KEY"], {
-        encoding: "utf8",
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-      const match = /OPENROUTER_API_KEY\s+REG_(?:EXPAND_)?SZ\s+(\S+)/.exec(output)
-      if (match?.[1]) {
-        cachedKey = match[1]
-        return cachedKey
-      }
+      const value = queryRegistry(hive, "OPENROUTER_API_KEY")
+      if (value) return remember(value)
     } catch {
       continue
     }
@@ -92,9 +117,11 @@ function readApiKey() {
   return ""
 }
 
+readApiKey()
+
 async function search(query, settings, signal) {
   const apiKey = readApiKey()
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY ist nicht gesetzt.")
+  if (!apiKey) throw new Error("OpenRouterApiKey fehlt in HKLM\\SOFTWARE\\cubeone\\OpenCode.")
   const response = await fetch(CHAT_COMPLETIONS, {
     method: "POST",
     headers: {

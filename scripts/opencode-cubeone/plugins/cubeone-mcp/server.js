@@ -4,11 +4,17 @@ const STATUS_TEXT = {
   pending: "startet noch",
 }
 
+/** The note server still introduces itself as Outline. The config name is cube-note. */
+export function labelOf(server) {
+  if (server?.name === "cube-note" || server?.title === "Outline") return "cube note"
+  return server?.title || server?.name || ""
+}
+
 /** The note for the model, or "" when every enabled server is connected. */
 export function unavailableNote(servers) {
   const missing = (servers ?? []).filter((server) => STATUS_TEXT[server?.status?.status])
   if (!missing.length) return ""
-  const list = missing.map((server) => `${server.title || server.name} (${STATUS_TEXT[server.status.status]})`).join(", ")
+  const list = missing.map((server) => `${labelOf(server)} (${STATUS_TEXT[server.status.status]})`).join(", ")
   const login = missing.some((server) => server.status.status === "needs_auth")
   return [
     `Diese MCP-Server stehen in dieser Sitzung nicht zur Verfügung: ${list}. Ihre Werkzeuge fehlen.`,

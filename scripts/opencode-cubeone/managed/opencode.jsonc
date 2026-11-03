@@ -835,6 +835,26 @@
       "action": "integration.use",
       "resource": "redmine",
       "effect": "allow"
+    },
+    {
+      "action": "plugin.use",
+      "resource": "C:/ProgramData/opencode/cubeone/plugins/*",
+      "effect": "allow"
+    },
+    {
+      "action": "plugin.use",
+      "resource": "@plannotator/opencode@0.28.43",
+      "effect": "allow"
+    },
+    {
+      "action": "plugin.use",
+      "resource": "@tarquinen/opencode-dcp@3.2.0",
+      "effect": "allow"
+    },
+    {
+      "action": "plugin.use",
+      "resource": "opencode-mem@2.39.0",
+      "effect": "allow"
     }
   ],
   "mcp": {
@@ -1079,7 +1099,29 @@
         "gate": true,
         "rulesMandatory": "C:/ProgramData/opencode/rules",
         "rulesOptional": "~/.config/opencode/rules/optional",
-        "disabledFile": "~/.config/opencode/vorgaben-deaktiviert.json"
+        "disabledFile": "~/.config/opencode/vorgaben-deaktiviert.json",
+        "models": {
+          "openrouter-zdr": [
+            "~anthropic/claude-opus-latest",
+            "~anthropic/claude-sonnet-latest",
+            "~anthropic/claude-haiku-latest",
+            "~openai/gpt-sol-latest",
+            "~openai/gpt-terra-latest",
+            "~openai/gpt-luna-latest",
+            "~x-ai/grok-latest",
+            "mistralai/mistral-large-4-0",
+            "mistralai/mistral-medium-3-5",
+            "mistralai/mistral-small-2603",
+            "~deepseek/deepseek-pro-latest",
+            "~deepseek/deepseek-flash-latest",
+            "moonshotai/kimi-k3.1-pro",
+            "~z-ai/glm-latest",
+            "qwen/qwen3.8-2.4t-a95b",
+            "qwen/qwen3.8-27b",
+            "minimax/minimax-m3.1-flash",
+            "openrouter/auto"
+          ]
+        }
       }
     },
     {

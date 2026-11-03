@@ -366,6 +366,12 @@ $config = [ordered]@{
         # Registered by the cubeone-redmine plugin; plugin integrations need both actions, MCP ones only use.
         [ordered]@{ action = 'integration.connect'; resource = 'redmine'; effect = 'allow' }
         [ordered]@{ action = 'integration.use'; resource = 'redmine'; effect = 'allow' }
+        # The last matching statement wins and this document is read after the user's config, so a user
+        # "plugin.use deny" cannot switch off a managed plugin. The resource is the package as configured.
+        [ordered]@{ action = 'plugin.use'; resource = 'C:/ProgramData/opencode/cubeone/plugins/*'; effect = 'allow' }
+        [ordered]@{ action = 'plugin.use'; resource = $PlannotatorPackage; effect = 'allow' }
+        [ordered]@{ action = 'plugin.use'; resource = $ContextPruningPackage; effect = 'allow' }
+        [ordered]@{ action = 'plugin.use'; resource = $MemoryPackage; effect = 'allow' }
     )
     # GitLab's own MCP server (branded "cube git"): OAuth with dynamic client registration, pipelines, jobs and logs.
     mcp          = [ordered]@{
@@ -430,6 +436,8 @@ $config = [ordered]@{
                 rulesMandatory = 'C:/ProgramData/opencode/rules'
                 rulesOptional  = '~/.config/opencode/rules/optional'
                 disabledFile   = '~/.config/opencode/vorgaben-deaktiviert.json'
+                # Models a user config adds to this provider are disabled.
+                models         = [ordered]@{ $ProviderId = @($models.Keys) }
             }
         }
         [ordered]@{

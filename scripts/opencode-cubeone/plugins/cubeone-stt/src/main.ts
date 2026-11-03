@@ -11,26 +11,31 @@ function option(options: Readonly<Record<string, unknown>>, key: string, fallbac
   return typeof value === "string" && value.trim() ? value.trim() : fallback
 }
 
-// The desktop app keeps the environment it was started with, so a key that was
-// set later is only visible in the registry until the next sign-in.
+function parseRegistryValue(output: string, name: string) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = new RegExp(`${escaped}\\s+REG_(?:EXPAND_)?SZ\\s+(\\S+)`).exec(output)
+  return match?.[1]?.trim() ?? ""
+}
+
+function queryRegistry(hive: string, name: string) {
+  const args = ["query", hive, "/v", name]
+  if (hive.startsWith("HKLM\\")) args.push("/reg:64")
+  const output = execFileSync("reg.exe", args, {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+  return parseRegistryValue(output, name)
+}
+
+// Dictation has its own key. The model key stays OpenRouterApiKey and is never used here.
 function readApiKey(): string {
-  const fromEnv = process.env.OPENROUTER_API_KEY?.trim()
-  if (fromEnv) return fromEnv
   if (process.platform !== "win32") return ""
-  for (const hive of ["HKCU\\Environment", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"]) {
-    try {
-      const output = execFileSync("reg.exe", ["query", hive, "/v", "OPENROUTER_API_KEY"], {
-        encoding: "utf8",
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-      const match = /OPENROUTER_API_KEY\s+REG_(?:EXPAND_)?SZ\s+(\S+)/.exec(output)
-      if (match) return match[1]
-    } catch {
-      continue
-    }
+  try {
+    return queryRegistry("HKLM\\SOFTWARE\\cubeone\\OpenCode", "OpenRouterVoiceApiKey")
+  } catch {
+    return ""
   }
-  return ""
 }
 
 export const main: Plugin.MainSetup = (ctx) => {
@@ -47,7 +52,7 @@ export const main: Plugin.MainSetup = (ctx) => {
     transcribe: async (input, caller) => {
       if (!endpoint.startsWith("https://")) throw new Error("Der STT-Endpunkt muss HTTPS verwenden.")
       const apiKey = readApiKey()
-      if (!apiKey) throw new Error("OPENROUTER_API_KEY ist nicht gesetzt.")
+      if (!apiKey) throw new Error("OpenRouterVoiceApiKey fehlt in HKLM\\SOFTWARE\\cubeone\\OpenCode.")
       if (!input.audio) throw new Error("Die Aufnahme ist leer.")
 
       const body: Record<string, unknown> = {

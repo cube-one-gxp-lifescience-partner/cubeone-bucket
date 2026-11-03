@@ -5,7 +5,7 @@
     "license": "MIT",
     "notes": [
         "The managed configuration lives in C:\\ProgramData\\opencode and is read-only for everyone except Administrators and SYSTEM.",
-        "Set OPENROUTER_API_KEY (user or machine environment) and OPENCODE_DISABLE_FREE_MODELS=1, then restart OpenCode.",
+        "Put the keys in HKLM\\SOFTWARE\\cubeone\\OpenCode. OpenRouterApiKey is for models and everything else. OpenRouterVoiceApiKey is only for dictation. Neither value is part of this package. Set OPENCODE_DISABLE_FREE_MODELS=1, then restart OpenCode.",
         "MCP servers and optional rules are in ~\\.config\\opencode and stay editable."
     ],
     "architecture": {

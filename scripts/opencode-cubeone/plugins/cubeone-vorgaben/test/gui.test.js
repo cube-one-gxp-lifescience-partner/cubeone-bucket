@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import Module, { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
@@ -16,6 +16,7 @@ function loadGui() {
         },
       }
     }
+    if (request === "effect") return { Schema: { String: "String" } }
     if (request === "@opencode/plugin/gui") return { ComposerPill: "ComposerPill", Plugin: { define: (definition) => definition } }
     return original.call(this, request, ...rest)
   }
@@ -35,6 +36,8 @@ function tempDir() {
 test("titleOf reads titel: from vorgabe front matter, else the first heading, else the id", () => {
   const gui = loadGui()
   assert.equal(gui.titleOf("vorgabe", "oidc", '---\ntitel: OIDC\npfade:\n  - "**/*auth*"\n---\nText'), "OIDC")
+  assert.equal(gui.titleOf("vorgabe", "bash", '---\ntitel: "Bash Coding Standards"\n---\n# x'), "Bash Coding Standards")
+  assert.equal(gui.titleOf("always", "design", "---\ntitel: Design\n---\n# Icons\n"), "Design")
   assert.equal(gui.titleOf("always", "kundenrechner", "# Kundenrechner\n\nText."), "Kundenrechner")
   assert.equal(gui.titleOf("always", "x", "Nur Text."), "x")
 })
@@ -85,18 +88,77 @@ test("read/writeDisabled round-trip and tolerate a missing file", () => {
   }
 })
 
-test("the pill lists mandatory rules without a button and toggles optional ones", () => {
+test("main lists the configured folders and toggles only optional rules", () => {
+  const gui = loadGui()
+  const root = tempDir()
+  try {
+    const folders = ["rules", "optional", "vorgaben", "eigene"].map((name) => path.join(root, name))
+    for (const folder of folders) mkdirSync(folder)
+    writeFileSync(path.join(folders[0], "geheimnisse.md"), "# Geheimnisse\n\nNichts in Git.")
+    writeFileSync(path.join(folders[1], "paket.md"), "# Paketinstallation\n\nScoop.")
+    writeFileSync(path.join(folders[2], "oidc.md"), "---\ntitel: OIDC\n---\nText")
+    const options = { rulesMandatory: folders[0], rulesOptional: folders[1], dirs: [folders[2], folders[3]], disabledFile: path.join(root, "aus.json") }
+    let provided
+    gui.default.main({ options, provide: (token, impl) => (provided = { token, impl }) })
+    assert.equal(provided.token, gui.Vorgaben)
+    const first = JSON.parse(provided.impl.list())
+    assert.deepEqual(first.rules.map((rule) => rule.id).sort(), ["geheimnisse", "oidc", "paket"])
+    assert.deepEqual(first.disabled, [])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("paket")).disabled, ["paket"])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("geheimnisse")).disabled, ["paket"])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("oidc")).disabled, ["paket"])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("paket")).disabled, [])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("remoteDisableCommand writes the off-switch and rejects anything that is not a rule id", () => {
+  const gui = loadGui()
+  const command = gui.remoteDisableCommand(["Design", "mcp"])
+  assert.match(command, /printf '%s\\n' '\{"disabled":\["design","mcp"\]\}'/)
+  assert.equal(gui.isRemoteSession({ server: { id: "ssh:coding-vm-1" } }), true)
+  assert.equal(gui.isRemoteSession({ server: { id: "sidecar" } }), false)
+  assert.equal(gui.isRemoteSession(undefined), false)
+  assert.throws(() => gui.remoteDisableCommand(["design'; rm -rf /"]))
+})
+
+test("the pill shows what main lists, mandatory rules without a button, and toggles optional ones", async () => {
   const gui = loadGui()
   const added = []
-  const texts = { en: {}, de: { "tier.mandatory": "Pflicht", "tier.optional.on": "aktiv", "tier.optional.off": "aus" } }
-  gui.default.setup({
-    t: (key) => texts.de[key] ?? key,
+  const texts = { "tier.mandatory": "Pflicht", "tier.optional.on": "aktiv", "tier.optional.off": "aus" }
+  let disabled = []
+  const rules = [
+    { id: "geheimnisse", kind: "always", tier: "mandatory", title: "Geheimnisse" },
+    { id: "paket", kind: "always", tier: "optional", title: "Paketinstallation" },
+  ]
+  const toggled = []
+  const controller = new AbortController()
+  const cleanup = gui.default.setup({
+    t: (key) => texts[key] ?? key,
     add: (_registry, value) => added.push(value),
+    signal: controller.signal,
+    main: (token) => {
+      assert.equal(token, gui.Vorgaben)
+      return {
+        list: async () => JSON.stringify({ rules, disabled }),
+        toggle: async (id) => (toggled.push(id), (disabled = disabled.includes(id) ? [] : [id]), JSON.stringify({ rules, disabled })),
+      }
+    },
   })
   const pill = added[0]
+  assert.equal(pill.show({}).rows[0].id, "loading")
+  await new Promise((resolve) => setTimeout(resolve, 10))
   const view = pill.show({})
-  assert.ok(Array.isArray(view.rows))
-  // Real folders on this machine may or may not exist; either way nothing throws and the shape is a pill.
-  assert.equal(typeof view.label, "string")
   assert.equal(view.icon, "shield")
+  const mandatory = view.rows.find((row) => row.id === "geheimnisse")
+  assert.equal(mandatory.detail, "Pflicht")
+  assert.equal(mandatory.run, undefined)
+  view.rows.find((row) => row.id === "paket").run()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.deepEqual(toggled, ["paket"])
+  assert.equal(pill.show({}).rows.find((row) => row.id === "paket").detail, "aus")
+  assert.equal(pill.show({}).tone, "warning")
+  controller.abort()
+  cleanup()
 })

@@ -16,6 +16,7 @@ function loadGui() {
         },
       }
     }
+    if (request === "effect") return { Schema: { String: "String" } }
     if (request === "@opencode/plugin/gui") return { ComposerPill: "ComposerPill", Plugin: { define: (definition) => definition } }
     return original.call(this, request, ...rest)
   }
@@ -39,8 +40,13 @@ test("parseListeningPorts keeps only LISTEN (0A) rows, decoded from hex, sorted 
   assert.deepEqual(gui.parseListeningPorts(TCP_LISTEN), [80, 8080])
 })
 
-test("parseListeningPorts drops excluded ports and tolerates empty/garbage input", () => {
+test("parseListeningPorts drops port 22 by default and still honors an explicit exclude set", () => {
   const gui = loadGui()
+  const listening = `  sl  local_address rem_address   st
+   0: 00000000:0016 00000000:0000 0A
+   1: 00000000:1F90 00000000:0000 0A
+`
+  assert.deepEqual(gui.parseListeningPorts(listening), [8080])
   assert.deepEqual(gui.parseListeningPorts(TCP_LISTEN, new Set([80])), [8080])
   assert.deepEqual(gui.parseListeningPorts(""), [])
   assert.deepEqual(gui.parseListeningPorts(undefined), [])
@@ -58,6 +64,7 @@ test("targetOf: sidecar and missing session are local, known aliases are ssh, an
   assert.equal(gui.targetOf({ server: { id: "sidecar" } }, hosts), undefined)
   assert.equal(gui.targetOf(undefined, hosts), undefined)
   assert.deepEqual(gui.targetOf({ server: { id: "coding-vm-1" } }, hosts), { kind: "ssh", id: "coding-vm-1" })
+  assert.deepEqual(gui.targetOf({ server: { id: "ssh:coding-vm-1" } }, hosts), { kind: "ssh", id: "coding-vm-1" })
   assert.deepEqual(gui.targetOf({ server: { id: "Ubuntu-24.04" } }, hosts), { kind: "wsl", id: "Ubuntu-24.04" })
 })
 
@@ -69,6 +76,14 @@ test("isValidPort accepts 1..65535 only", () => {
   assert.equal(gui.isValidPort(65536), false)
   assert.equal(gui.isValidPort("abc"), false)
   assert.equal(gui.isValidPort(undefined), false)
+  assert.equal(gui.isValidPort(22), false)
+})
+
+test("forwardArgs binds the local side on 127.0.0.1", () => {
+  const gui = loadGui()
+  const args = gui.forwardArgs(20000, 8080, "coding-vm-1")
+  assert.equal(args.at(-2), "127.0.0.1:20000:127.0.0.1:8080")
+  assert.equal(args.at(-1), "coding-vm-1")
 })
 
 test("pickLocalPort keeps the preferred port when free, else the first free port in range", async () => {
@@ -86,10 +101,24 @@ test("pickLocalPort gives up when the whole range is taken", async () => {
   assert.equal(await gui.pickLocalPort(3000, async () => true), undefined)
 })
 
+test("shellPorts reads the server output and keeps only listening ports", async () => {
+  const gui = loadGui()
+  const output = `  sl  local_address rem_address   st\n   0: 00000000:1F90 00000000:0000 0A\n`
+  const client = {
+    shell: {
+      create: async (input) => ({ data: { id: "sh1", command: input.command } }),
+      get: async () => ({ data: { id: "sh1", status: "exited", exit: 0 } }),
+      output: async () => ({ data: { output } }),
+      remove: async () => {},
+    },
+  }
+  assert.deepEqual(await gui.shellPorts(client, { directory: "/home/cubeone" }), [8080])
+})
+
 test("the pill is hidden for the local sidecar session and shown for a remote one", () => {
   const gui = loadGui()
   const added = []
-  const texts = { pill: "Vorschau", title: "Vorschau auf dem Remote-Ziel" }
+  const texts = { pill: "Ports", title: "Ports" }
   gui.default.setup({
     options: {},
     t: (key) => texts[key] ?? key,
@@ -99,7 +128,12 @@ test("the pill is hidden for the local sidecar session and shown for a remote on
   })
   const pill = added[0]
   assert.equal(pill.show({ session: { server: { id: "sidecar" }, directory: "/tmp" } }), undefined)
-  const view = pill.show({ session: { server: { id: "coding-vm-9" }, directory: "/tmp" } })
-  assert.equal(view.label, "Vorschau")
+  const view = pill.show({
+    session: {
+      server: { id: "coding-vm-9", client: { shell: { create: async () => new Promise(() => {}) } } },
+      directory: "/tmp",
+    },
+  })
+  assert.equal(view.label, "Ports")
   assert.equal(view.icon, "globe")
 })

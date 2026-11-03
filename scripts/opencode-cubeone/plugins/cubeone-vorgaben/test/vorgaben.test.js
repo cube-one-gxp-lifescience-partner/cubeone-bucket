@@ -1,10 +1,10 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
-import plugin, { loadAlways, loadRules, readDisabled } from "../server.js"
+import plugin, { curatedModels, disableUncurated, loadAlways, loadRules, readDisabled } from "../server.js"
 import { applicable, globToRegExp, parseAlwaysRule, touched, visibleRules } from "../vorgaben.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
@@ -14,7 +14,21 @@ const rules = loadRules(dirs)
 const ids = (files, text = "") => applicable(rules, files.map((file) => path.join(project, file)), text, project).map((hit) => hit.rule.id).sort()
 
 test("the shipped rules all load", () => {
-  assert.deepEqual(rules.map((rule) => rule.id).sort(), ["design", "mcp", "oidc", "sicherheit"])
+  assert.deepEqual(rules.map((rule) => rule.id).sort(), [
+    "bash",
+    "csharp",
+    "docker",
+    "gitlab-ci",
+    "html-css",
+    "java",
+    "javascript",
+    "php",
+    "powershell",
+    "python",
+    "r",
+    "sql",
+    "vba",
+  ])
 })
 
 test("globs", () => {
@@ -24,27 +38,11 @@ test("globs", () => {
   assert.ok(globToRegExp("**/*auth*").test("src/auth"))
 })
 
-test("src/auth/callback.ts gets OIDC and not Design", () => {
-  assert.deepEqual(ids(["src/auth/callback.ts"]), ["oidc"])
-})
-
-test("Button.tsx gets Design and not OIDC", () => {
-  assert.deepEqual(ids(["src/components/Button.tsx"]), ["design"])
-})
-
-test("a login component gets both", () => {
-  assert.deepEqual(ids(["src/auth/Login.tsx"]), ["design", "oidc"])
-})
-
-test("security by path and by content", () => {
-  assert.deepEqual(ids(["db/schema.sql"]), ["sicherheit"])
-  assert.deepEqual(ids(["src/users/user.repository.ts"]), ["sicherheit"])
-  assert.deepEqual(ids(["src/routes/users.ts"], "const rows = await db.query('SELECT * FROM users WHERE id = $1', [id])"), ["sicherheit"])
-  assert.deepEqual(ids(["src/routes/users.ts"], "export const list = () => []"), [])
-})
-
-test("MCP", () => {
-  assert.deepEqual(ids(["src/mcp/server.py"]), ["mcp"])
+test("a file gets only the rule whose glob matches it", () => {
+  assert.deepEqual(ids(["src/app.py"]), ["python"])
+  assert.deepEqual(ids(["db/schema.sql"]), ["sql"])
+  assert.deepEqual(ids([".gitlab-ci.yml"]), ["gitlab-ci"])
+  assert.deepEqual(ids(["src/auth/callback.ts"]), [])
 })
 
 test("folders above the project do not count", () => {
@@ -83,11 +81,11 @@ test("first change without the rule is stopped once, with the rule", async () =>
   const { ctx, hooks } = harness()
   await plugin.setup(ctx)
   await hooks.context({ sessionID: "s1", messages: [] })
-  const call = { tool: "write", sessionID: "s1", input: { path: path.join(project, "src/components/Button.tsx"), content: "x" } }
+  const call = { tool: "write", sessionID: "s1", input: { path: path.join(project, "src/app.py"), content: "x" } }
   await assert.rejects(hooks["execute.before"]({ ...call }), (error) => {
-    assert.match(error.message, /cubeone-vorgabe:design/)
-    assert.match(error.message, /#F47A27/)
-    assert.doesNotMatch(error.message, /realm_access/)
+    assert.match(error.message, /cubeone-vorgabe:python/)
+    assert.match(error.message, /PEP 8/)
+    assert.doesNotMatch(error.message, /SQLFluff/)
     return true
   })
   await hooks["execute.before"]({ ...call })
@@ -101,23 +99,23 @@ test("a read appends the rule once, then a reference", async () => {
     tool: "read",
     sessionID: "s2",
     status: "completed",
-    input: { path: path.join(project, "src/auth/callback.ts") },
-    result: { content: "export async function callback() {}" },
+    input: { path: path.join(project, "db/schema.sql") },
+    result: { content: "select 1" },
   })
   const first = read()
   await hooks["execute.after"](first)
-  assert.match(first.result.content, /cubeone-vorgabe:oidc/)
-  assert.match(first.result.content, /realm_access\.roles/)
-  assert.doesNotMatch(first.result.content, /Phosphor/)
+  assert.match(first.result.content, /cubeone-vorgabe:sql/)
+  assert.match(first.result.content, /SQLFluff/)
+  assert.doesNotMatch(first.result.content, /PEP 8/)
   const second = read()
   await hooks["execute.after"](second)
-  assert.match(second.result.content, /cubeone-verweis:oidc/)
-  assert.doesNotMatch(second.result.content, /realm_access/)
+  assert.match(second.result.content, /cubeone-verweis:sql/)
+  assert.doesNotMatch(second.result.content, /SQLFluff/)
 
   await hooks.context({ sessionID: "s2", messages: [{ text: "compacted summary" }] })
   const third = read()
   await hooks["execute.after"](third)
-  assert.match(third.result.content, /cubeone-vorgabe:oidc/)
+  assert.match(third.result.content, /cubeone-vorgabe:sql/)
 })
 
 test("parseAlwaysRule takes the title from the first heading, else falls back to the id", () => {
@@ -188,13 +186,64 @@ test("a managed vorgabe cannot be disabled even if its id appears in the disable
   const dir = tempDir()
   const disabledFile = path.join(dir, "deaktiviert.json")
   try {
-    writeFileSync(disabledFile, JSON.stringify({ disabled: ["oidc"] }))
+    writeFileSync(disabledFile, JSON.stringify({ disabled: ["python"] }))
     const { ctx, hooks } = harness({ disabledFile })
     await plugin.setup(ctx)
-    const call = { tool: "write", sessionID: "guard", input: { path: path.join(project, "src/auth/callback.ts"), content: "x" } }
+    const call = { tool: "write", sessionID: "guard", input: { path: path.join(project, "src/app.py"), content: "x" } }
     await hooks.context({ sessionID: "guard", messages: [] })
-    await assert.rejects(hooks["execute.before"](call), /cubeone-vorgabe:oidc/)
+    await assert.rejects(hooks["execute.before"](call), /cubeone-vorgabe:python/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+function modelDraft(models) {
+  return {
+    models,
+    list: (providerID) => models.filter((model) => model.providerID === providerID),
+    update: (providerID, id, edit) => edit(models.find((model) => model.providerID === providerID && model.id === id)),
+  }
+}
+
+test("models a user adds to a managed provider are disabled, other providers stay untouched", () => {
+  const draft = modelDraft([
+    { providerID: "openrouter-zdr", id: "~anthropic/claude-sonnet-latest", enabled: true },
+    { providerID: "openrouter-zdr", id: "meta-llama/uncurated", enabled: true },
+    { providerID: "other", id: "x", enabled: true },
+  ])
+  disableUncurated(draft, curatedModels({ "openrouter-zdr": ["~anthropic/claude-sonnet-latest"] }))
+  assert.deepEqual(
+    draft.models.map((model) => model.enabled),
+    [true, false, true],
+  )
+})
+
+test("malformed model options curate nothing", () => {
+  assert.deepEqual(curatedModels(undefined), {})
+  assert.deepEqual(curatedModels(["a"]), {})
+  assert.deepEqual(curatedModels({ p: "a", q: ["b", 1] }), { q: ["b"] })
+})
+
+test("the plugin registers the model filter only when models are configured", async () => {
+  const transforms = []
+  const { ctx } = harness({ models: { "openrouter-zdr": ["a"] } })
+  ctx.model = { transform: async (callback) => transforms.push(callback) }
+  await plugin.setup(ctx)
+  assert.equal(transforms.length, 1)
+  const draft = modelDraft([{ providerID: "openrouter-zdr", id: "b", enabled: true }])
+  transforms[0](draft)
+  assert.equal(draft.models[0].enabled, false)
+
+  const bare = harness()
+  bare.ctx.model = { transform: async () => assert.fail("no models configured") }
+  await plugin.setup(bare.ctx)
+})
+
+test("the managed config curates exactly the models it defines", () => {
+  const text = readFileSync(path.join(root, "managed", "opencode.jsonc"), "utf8")
+  const config = JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""))
+  const vorgaben = config.plugins.find((entry) => entry.package?.endsWith("/cubeone-vorgaben"))
+  for (const [providerID, provider] of Object.entries(config.providers)) {
+    assert.deepEqual(vorgaben.options.models[providerID], Object.keys(provider.models))
   }
 })

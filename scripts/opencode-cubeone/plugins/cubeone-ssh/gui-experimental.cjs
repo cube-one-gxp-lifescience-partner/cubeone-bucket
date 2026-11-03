@@ -9,18 +9,36 @@
 // The one thing this pill needs that `rows` cannot give it is a free-text port field, so unlike the sibling pills
 // it renders its popover with plain DOM calls instead of `rows` - still no JSX and no bundler, just the browser DOM
 // plus solid-js's `createSignal`/`createEffect`, which work the same with or without a JSX compiler.
-const { execFile, spawn } = require("node:child_process")
+// The window only gets inert stand-ins for `node:` modules, so reading ports goes through the session's own server
+// and the SSH forward runs in `main`. The popover is plain DOM: the host draws every button as a menu row, which
+// crushed the port field against "Öffnen".
+const { spawn } = require("node:child_process")
 const fs = require("node:fs")
 const net = require("node:net")
 const os = require("node:os")
 const path = require("node:path")
+const { Schema } = require("effect")
 const { createSignal, createEffect } = require("solid-js")
-const { ComposerPill, Plugin } = require("@opencode/plugin/gui")
+const gui = require("@opencode/plugin/gui")
+const { ComposerPill, Plugin } = gui
+
+const PREVIEW_SPEC = {
+  id: "cubeone-ssh",
+  methods: {
+    kind: { input: Schema.String, output: Schema.String },
+    reachable: { input: Schema.String, output: Schema.String },
+    forward: { input: Schema.String, output: Schema.String },
+    stop: { input: Schema.String },
+  },
+}
+const Preview = gui.Ipc ? gui.Ipc.define(PREVIEW_SPEC) : { kind: "ipc", id: PREVIEW_SPEC.id, spec: PREVIEW_SPEC }
 
 const SCAN_TIMEOUT_MS = 8_000
 const CONNECT_TIMEOUT_MS = 1_500
-const FORWARD_WAIT_MS = 5_000
+const FORWARD_WAIT_MS = 12_000
 const LOCAL_PORT_RANGE = { from: 20000, to: 20200 }
+/** sshd itself. Forwarding it only opens another login, and it is not a service to preview. */
+const EXCLUDED_PORTS = new Set([22])
 
 function expand(file) {
   return file.startsWith("~/") || file.startsWith("~\\") ? path.join(os.homedir(), file.slice(2)) : file
@@ -59,7 +77,7 @@ function message(error) {
  * Parses `/proc/net/tcp` and `/proc/net/tcp6`: each data line's 2nd column is "local_address:port" in hex, and the
  * 4th column is the connection state in hex, where `0A` is LISTEN. Returns the sorted, de-duplicated port numbers.
  */
-function parseListeningPorts(text, exclude) {
+function parseListeningPorts(text, exclude = EXCLUDED_PORTS) {
   const skip = exclude instanceof Set ? exclude : new Set(exclude ?? [])
   const ports = new Set()
   for (const line of String(text ?? "").split("\n")) {
@@ -80,40 +98,159 @@ function listPortsCommand() {
 
 function isValidPort(value) {
   const port = Number(value)
-  return Number.isInteger(port) && port > 0 && port < 65536
+  return Number.isInteger(port) && port > 0 && port < 65536 && !EXCLUDED_PORTS.has(port)
+}
+
+/**
+ * Same shape as the desktop's own tunnel: bind explicitly on 127.0.0.1. Without the bind address, Windows OpenSSH
+ * listens on ::1 only, and the readiness check against 127.0.0.1 then never succeeds.
+ */
+function forwardArgs(localPort, port, alias) {
+  return [
+    "-N",
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "ConnectTimeout=8",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPersist=no",
+    "-L",
+    `127.0.0.1:${localPort}:127.0.0.1:${port}`,
+    alias,
+  ]
+}
+
+/** Desktop server ids are the SSH alias, or `ssh:` plus that alias. */
+function sshAliasOf(id, hosts) {
+  const text = String(id ?? "")
+  const bare = text.replace(/^ssh:/i, "")
+  return hosts.find((host) => host === text || host === bare || host.toLowerCase() === bare.toLowerCase())
 }
 
 /**
  * The session's remote target, or undefined for the local sidecar - only SSH and WSL sessions get this pill.
- * `session.server.id` is the SSH alias for an SSH session (Install-OpenCodeRemote.ps1 registers it under that
- * name); anything else non-local is treated as a WSL distro name, the only other remote kind cube one installs.
+ * Anything else non-local is a WSL distro name, the only other remote kind cube one installs.
  */
 function targetOf(session, hosts) {
   const id = session?.server?.id
   if (!id || id === "sidecar") return undefined
-  return hosts.includes(id) ? { kind: "ssh", id } : { kind: "wsl", id }
+  const alias = sshAliasOf(id, hosts)
+  return alias ? { kind: "ssh", id: alias } : { kind: "wsl", id }
 }
 
-function execFileAsync(command, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        error.message = stderr?.trim() ? `${error.message}: ${stderr.trim()}` : error.message
-        reject(error)
-        return
+/** Runs the port listing on the session's server, through the connection OpenCode already has, and reads its output. */
+async function shellPorts(client, location, command = listPortsCommand()) {
+  const created = await client.shell.create({ location, command, timeout: SCAN_TIMEOUT_MS })
+  const id = created?.data?.id
+  if (!id) throw new Error("Fehler: Der Server hat die Portprüfung nicht gestartet.")
+  try {
+    const until = Date.now() + SCAN_TIMEOUT_MS
+    let info
+    while (Date.now() < until) {
+      info = (await client.shell.get({ id, location }))?.data
+      if (info?.status && info.status !== "running") break
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    if (info?.status !== "exited" || (info.exit ?? 0) !== 0) throw new Error("Fehler: Die Portprüfung auf dem Server ist fehlgeschlagen.")
+    const page = await client.shell.output({ id, location, cursor: 0, limit: 500_000 })
+    return parseListeningPorts(page?.data?.output)
+  } finally {
+    void Promise.resolve(client.shell.remove?.({ id, location })).catch(() => {})
+  }
+}
+
+/** The main-process side of `Preview`: which server is an SSH alias, whether a local port answers, and the forward. */
+function previewService(options) {
+  const configPath = expand(typeof options?.configPath === "string" ? options.configPath : "~/.ssh/config")
+  const held = new Map()
+  let next = 0
+  const aliases = () => {
+    try {
+      return parseSshConfig(fs.readFileSync(configPath, "utf8"))
+    } catch {
+      return []
+    }
+  }
+  const stop = (id) => {
+    const child = held.get(String(id))
+    if (!child) return
+    held.delete(String(id))
+    child.kill?.()
+  }
+  return {
+    kind(server) {
+      return targetOf({ server: { id: String(server ?? "") } }, aliases())?.kind ?? ""
+    },
+    reachable(text) {
+      const port = Number(text)
+      if (!isValidPort(port)) return Promise.resolve("")
+      return canConnect(port).then((ok) => (ok ? "1" : ""))
+    },
+    async forward(text) {
+      const request = JSON.parse(String(text))
+      const port = Number(request?.port)
+      const requested = String(request?.alias ?? "")
+      const alias = sshAliasOf(requested, aliases()) ?? requested
+      if (!alias || !isValidPort(port)) throw new Error("Fehler: Weiterleitung ohne Ziel oder Port.")
+      const localPort = await pickLocalPort(port, (candidate) => canConnect(candidate))
+      if (!localPort) throw new Error("Fehler: Kein freier lokaler Port gefunden.")
+      const child = spawn("ssh", forwardArgs(localPort, port, alias), {
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      })
+      let stderr = ""
+      child.stderr?.on("data", (chunk) => {
+        stderr = `${stderr}${chunk}`.slice(-500)
+      })
+      const sshError = (fallback) => {
+        const detail = stderr.trim()
+        return new Error(detail ? `Fehler: ${detail}` : fallback)
       }
-      resolve(stdout)
-    })
-  })
-}
-
-async function scanPorts(target, runner = execFileAsync) {
-  const command = listPortsCommand()
-  const stdout =
-    target.kind === "ssh"
-      ? await runner("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", target.id, command], SCAN_TIMEOUT_MS)
-      : await runner("wsl.exe", ["-d", target.id, "--", "sh", "-c", command], SCAN_TIMEOUT_MS)
-  return parseListeningPorts(stdout)
+      await new Promise((resolve, reject) => {
+        let settled = false
+        const finish = (error) => {
+          if (settled) return
+          settled = true
+          if (error) {
+            child.kill?.()
+            reject(error)
+            return
+          }
+          resolve()
+        }
+        child.once("error", finish)
+        child.once("exit", (code) => finish(sshError(`Fehler: ssh hat die Weiterleitung beendet (${code ?? "?"}).`)))
+        const until = Date.now() + FORWARD_WAIT_MS
+        const poll = async () => {
+          if (settled) return
+          if (await canConnect(localPort)) {
+            child.removeAllListeners("exit")
+            child.removeAllListeners("error")
+            finish()
+            return
+          }
+          if (Date.now() >= until) {
+            finish(sshError("Fehler: Die Weiterleitung wurde nicht rechtzeitig bereit."))
+            return
+          }
+          setTimeout(poll, 100)
+        }
+        void poll()
+      })
+      const id = String(++next)
+      held.set(id, child)
+      return JSON.stringify({ id, localPort })
+    },
+    stop,
+    dispose() {
+      for (const id of [...held.keys()]) stop(id)
+    },
+  }
 }
 
 function canConnect(port, timeoutMs = CONNECT_TIMEOUT_MS) {
@@ -139,58 +276,65 @@ async function pickLocalPort(preferred, isTaken, range = LOCAL_PORT_RANGE) {
   return undefined
 }
 
-function waitReachable(port, deadlineMs) {
-  const until = Date.now() + deadlineMs
-  const poll = async () => {
-    if (await canConnect(port)) return true
-    if (Date.now() >= until) return false
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    return poll()
-  }
-  return poll()
-}
-
 exports.parseSshConfig = parseSshConfig
 exports.parseListeningPorts = parseListeningPorts
 exports.listPortsCommand = listPortsCommand
 exports.isValidPort = isValidPort
+exports.forwardArgs = forwardArgs
 exports.targetOf = targetOf
 exports.pickLocalPort = pickLocalPort
+exports.shellPorts = shellPorts
+exports.previewService = previewService
+exports.Preview = Preview
 
 exports.default = Plugin.define({
   i18n: {
     en: {
-      pill: "Preview",
-      title: "Preview on the remote target",
+      pill: "Ports",
+      title: "Ports",
       loading: "Checking open ports…",
       none: "No open ports found",
       port: "Port",
       refresh: "Check again",
       stop: "Disconnect",
-      "manual.placeholder": "Other port…",
+      "manual.label": "Other port",
+      "manual.placeholder": "3000",
       "manual.open": "Open",
       "manual.invalid": "Enter a port between 1 and 65535",
+      "port.excluded": "Port 22 is excluded",
       "list.failed": "Ports unavailable",
       "open.failed": "Could not open the port",
       "open.noPort": "No free local port found",
       "wsl.unreachable": "Not reachable at 127.0.0.1 inside WSL",
     },
     de: {
-      pill: "Vorschau",
-      title: "Vorschau auf dem Remote-Ziel",
+      pill: "Ports",
+      title: "Ports",
       loading: "Offene Ports werden geprüft …",
       none: "Keine offenen Ports gefunden",
       port: "Port",
       refresh: "Neu prüfen",
       stop: "Trennen",
-      "manual.placeholder": "Anderer Port…",
+      "manual.label": "Anderer Port",
+      "manual.placeholder": "3000",
       "manual.open": "Öffnen",
       "manual.invalid": "Port zwischen 1 und 65535 eingeben",
+      "port.excluded": "Port 22 ist ausgenommen",
       "list.failed": "Ports nicht abrufbar",
       "open.failed": "Port konnte nicht geöffnet werden",
       "open.noPort": "Kein freier lokaler Port gefunden",
       "wsl.unreachable": "Unter 127.0.0.1 in WSL nicht erreichbar",
     },
+  },
+  main(ctx) {
+    const service = previewService(ctx.options)
+    ctx.provide(Preview, {
+      kind: (server) => service.kind(server),
+      reachable: (port) => service.reachable(port),
+      forward: (text) => service.forward(text),
+      stop: (id) => service.stop(id),
+    })
+    return () => service.dispose()
   },
   setup(ctx) {
     const configPath = expand(typeof ctx.options?.configPath === "string" ? ctx.options.configPath : "~/.ssh/config")
@@ -204,7 +348,7 @@ exports.default = Plugin.define({
 
     const [states, setStates] = createSignal(new Map())
     const scanning = new Set()
-    const forwards = new Map() // forwardKey -> { localPort, port, child, kind }
+    const forwards = new Map()
 
     const keyOf = (session) => `${session.server.id}\n${session.directory}`
     const forwardKey = (session, port) => `${keyOf(session)}\n${port}`
@@ -213,16 +357,17 @@ exports.default = Plugin.define({
       next.set(key, { ...next.get(key), ...patch })
       setStates(next)
     }
+    const bridge = () => ctx.main(Preview)
 
-    const refresh = async (session, target) => {
+    const refresh = async (session) => {
       const key = keyOf(session)
       if (scanning.has(key)) return
       scanning.add(key)
       try {
-        const ports = await scanPorts(target)
-        store(key, { ports, error: undefined })
+        const ports = await shellPorts(session.server.client, { directory: session.directory })
+        store(key, { ports, error: undefined, checked: true })
       } catch (error) {
-        store(key, { ports: [], error: message(error) })
+        store(key, { ports: [], error: message(error), checked: true })
       } finally {
         scanning.delete(key)
       }
@@ -232,49 +377,37 @@ exports.default = Plugin.define({
       const entry = forwards.get(fKey)
       if (!entry) return
       forwards.delete(fKey)
-      entry.child?.kill()
+      void bridge().stop(entry.id).catch(() => {})
     }
 
-    const open = async (session, target, port) => {
+    const open = async (session, port) => {
       const key = keyOf(session)
+      if (EXCLUDED_PORTS.has(Number(port))) {
+        store(key, { manualError: ctx.t("port.excluded") })
+        return
+      }
       if (!isValidPort(port)) {
         store(key, { manualError: ctx.t("manual.invalid") })
         return
       }
       store(key, { manualError: undefined, opening: port })
       try {
-        if (target.kind === "wsl") {
-          if (await canConnect(port)) {
-            ctx.system.openExternal(`http://127.0.0.1:${port}`)
-            return
-          }
-          throw new Error(ctx.t("wsl.unreachable"))
-        }
+        const preview = bridge()
         const fKey = forwardKey(session, port)
         const existing = forwards.get(fKey)
         if (existing) {
           ctx.system.openExternal(`http://127.0.0.1:${existing.localPort}`)
           return
         }
-        const localPort = await pickLocalPort(port, (candidate) => canConnect(candidate))
-        if (!localPort) throw new Error(ctx.t("open.noPort"))
-        const child = spawn(
-          "ssh",
-          ["-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-L", `${localPort}:127.0.0.1:${port}`, target.id],
-          { stdio: "ignore", windowsHide: true },
-        )
-        child.once("exit", () => {
-          forwards.delete(fKey)
-          store(key, {})
-        })
-        forwards.set(fKey, { localPort, port, child, kind: target.kind })
-        store(key, {})
-        const ready = await waitReachable(localPort, FORWARD_WAIT_MS)
-        if (!ready) {
-          stopForward(fKey)
-          throw new Error(ctx.t("open.failed"))
+        if ((await preview.reachable(String(port))) === "1") {
+          ctx.system.openExternal(`http://127.0.0.1:${port}`)
+          return
         }
-        ctx.system.openExternal(`http://127.0.0.1:${localPort}`)
+        if ((await preview.kind(session.server.id)) !== "ssh") throw new Error(ctx.t("wsl.unreachable"))
+        const opened = JSON.parse(await preview.forward(JSON.stringify({ alias: session.server.id, port })))
+        forwards.set(fKey, { id: opened.id, localPort: opened.localPort, port })
+        store(key, {})
+        ctx.system.openExternal(`http://127.0.0.1:${opened.localPort}`)
       } catch (error) {
         ctx.toast.show({ variant: "error", title: ctx.t("pill"), description: message(error) })
       } finally {
@@ -291,7 +424,7 @@ exports.default = Plugin.define({
         if (!target) return undefined
         const key = keyOf(session)
         const state = states().get(key)
-        if (!state) queueMicrotask(() => void refresh(session, target))
+        if (!state) queueMicrotask(() => void refresh(session))
         const activeCount = [...forwards.keys()].filter((fKey) => fKey.startsWith(`${key}\n`)).length
         return {
           label: activeCount ? `${ctx.t("pill")} (${activeCount})` : ctx.t("pill"),
@@ -304,53 +437,66 @@ exports.default = Plugin.define({
         const session = input.session
         const target = targetOf(session, hosts())
         const container = document.createElement("div")
+        container.className = "cubeone-vorschau"
         if (!target) {
           container.textContent = ctx.t("none")
           return container
         }
         const key = keyOf(session)
-
+        const style = document.createElement("style")
+        style.textContent = MENU_STYLE
         const status = document.createElement("p")
+        status.className = "status"
         const list = document.createElement("div")
+        list.className = "ports"
         const activeList = document.createElement("div")
+        activeList.className = "active"
         const errorLine = document.createElement("p")
         const form = document.createElement("form")
         const portInput = document.createElement("input")
         portInput.type = "number"
         portInput.min = "1"
         portInput.max = "65535"
-        portInput.placeholder = ctx.t("manual.placeholder")
+        portInput.placeholder = ctx.t("manual.label")
+        portInput.setAttribute("aria-label", ctx.t("manual.label"))
         const submit = document.createElement("button")
         submit.type = "submit"
+        submit.className = "primary"
         submit.textContent = ctx.t("manual.open")
         form.append(portInput, submit)
         form.addEventListener("submit", (event) => {
           event.preventDefault()
-          void open(session, target, Number(portInput.value))
+          void open(session, Number(portInput.value))
         })
         const refreshButton = document.createElement("button")
         refreshButton.type = "button"
         refreshButton.textContent = ctx.t("refresh")
-        refreshButton.addEventListener("click", () => void refresh(session, target))
+        refreshButton.addEventListener("click", () => void refresh(session))
 
-        container.append(status, list, errorLine, activeList, form, refreshButton)
+        container.append(style, status, list, errorLine, activeList, form, refreshButton)
 
         createEffect(() => {
           const state = states().get(key)
-          status.textContent = state?.error ? `${ctx.t("list.failed")}: ${state.error}` : ctx.t(state ? "title" : "loading")
+          status.hidden = Boolean(state?.checked) && !state?.error
+          status.textContent = state?.error ? `${ctx.t("list.failed")}: ${state.error}` : ctx.t("loading")
           errorLine.textContent = state?.manualError ?? ""
-          errorLine.style.display = state?.manualError ? "" : "none"
+          errorLine.hidden = !state?.manualError
 
           list.replaceChildren()
           for (const port of state?.ports ?? []) {
             const row = document.createElement("button")
             row.type = "button"
-            row.textContent = `${ctx.t("port")} ${port}`
+            const name = document.createElement("span")
+            name.textContent = String(port)
+            const detail = document.createElement("span")
+            detail.className = "detail"
+            detail.textContent = ctx.t("manual.open")
+            row.append(name, detail)
             row.disabled = state?.opening === port
-            row.addEventListener("click", () => void open(session, target, port))
+            row.addEventListener("click", () => void open(session, port))
             list.append(row)
           }
-          if (!state?.ports?.length && !state?.error) {
+          if (state?.checked && !state.ports?.length && !state.error) {
             const empty = document.createElement("p")
             empty.textContent = ctx.t("none")
             list.append(empty)
@@ -360,10 +506,12 @@ exports.default = Plugin.define({
           for (const [fKey, entry] of forwards) {
             if (!fKey.startsWith(`${key}\n`)) continue
             const row = document.createElement("div")
+            row.className = "row"
             const label = document.createElement("span")
             label.textContent = `${ctx.t("port")} ${entry.port} \u2192 127.0.0.1:${entry.localPort}`
             const stop = document.createElement("button")
             stop.type = "button"
+            stop.className = "stop"
             stop.textContent = ctx.t("stop")
             stop.addEventListener("click", () => {
               stopForward(fKey)
@@ -379,8 +527,23 @@ exports.default = Plugin.define({
     })
 
     return () => {
-      for (const entry of forwards.values()) entry.child?.kill()
+      for (const entry of forwards.values()) void bridge().stop(entry.id).catch(() => {})
       forwards.clear()
     }
   },
 })
+
+const MENU_STYLE = `
+.cubeone-vorschau { display: flex; flex-direction: column; gap: 2px; min-width: 220px; max-width: 280px; box-sizing: border-box; }
+.cubeone-vorschau p { margin: 0; padding: 4px 8px; opacity: 0.7; font-size: 13px; }
+.cubeone-vorschau .ports, .cubeone-vorschau .active { display: flex !important; flex-direction: column !important; gap: 0; max-height: 240px; overflow: auto; }
+.cubeone-vorschau form { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; padding: 4px 8px; }
+.cubeone-vorschau input { flex: 1; min-width: 0; width: auto !important; box-sizing: border-box; height: 28px !important; border: 0 !important; border-radius: 6px !important; background: color-mix(in srgb, currentColor 8%, transparent) !important; color: inherit !important; padding: 0 8px; font: inherit; }
+.cubeone-vorschau button { height: 28px !important; width: 100% !important; box-sizing: border-box; display: flex !important; align-items: center; justify-content: space-between; gap: 12px; border: 0 !important; border-radius: 6px !important; background: transparent !important; color: inherit !important; cursor: pointer; font: inherit; padding: 0 8px; text-align: left; }
+.cubeone-vorschau button:hover { background: color-mix(in srgb, currentColor 8%, transparent) !important; }
+.cubeone-vorschau button .detail { opacity: 0.55; font-size: 12px; }
+.cubeone-vorschau button.primary { width: auto !important; flex: none; color: #F47A27 !important; }
+.cubeone-vorschau button.primary:hover { color: #F05037 !important; }
+.cubeone-vorschau .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; min-height: 28px; }
+.cubeone-vorschau .row button.stop { width: auto !important; }
+`

@@ -23,13 +23,23 @@ param(
 $ErrorActionPreference = 'Stop'
 
 function Get-OpenRouterKey {
-    $found = @(
-        $env:OPENROUTER_API_KEY
-        [Environment]::GetEnvironmentVariable('OPENROUTER_API_KEY', 'User')
-        [Environment]::GetEnvironmentVariable('OPENROUTER_API_KEY', 'Machine')
-    ) | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1
-    if ($found) { return $found.Trim() }
-    return ''
+    # The key is deposited in the registry and is never printed.
+    $regBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $regSub = $regBase.OpenSubKey('SOFTWARE\cubeone\OpenCode')
+        if (-not $regSub) { return '' }
+        try {
+            $rawKey = $regSub.GetValue('OpenRouterApiKey')
+            if ($null -eq $rawKey) { return '' }
+            $apiKey = ([string]$rawKey).Trim()
+            if ($apiKey -match "[\r\n]") { throw 'OpenRouterApiKey in HKLM\SOFTWARE\cubeone\OpenCode must be a single line.' }
+            return $apiKey
+        } finally {
+            $regSub.Close()
+        }
+    } finally {
+        $regBase.Close()
+    }
 }
 
 function Get-WslDistros {
@@ -42,6 +52,20 @@ function Get-WslDistros {
     return @($text -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object {
         $_ -and $_ -notmatch '^(docker-desktop|docker-desktop-data)$'
     })
+}
+
+function Set-DesktopPrincipal {
+    param([string]$ConfigPath)
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return }
+    $text = [System.IO.File]::ReadAllText($ConfigPath)
+    if ($text -match '(?m)^[ \t]*SetEnv[ \t]+CUBEONE_PRINCIPAL=\S+') { return }
+    $bytes = New-Object byte[] 24
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    $principal = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    $block = "Host coding-vm-1 coding-vm-2 coding-vm-3 coding-vm-4 coding-vm-5 coding-vm-6 coding-vm-7 coding-vm-8`r`n    SetEnv CUBEONE_PRINCIPAL=$principal`r`n`r`n"
+    [System.IO.File]::WriteAllText($ConfigPath, $block + $text.TrimStart([char]0xFEFF))
+    Write-Host 'SSH config sends a personal OpenCode id to the coding VMs.' -ForegroundColor Green
 }
 
 function Register-DesktopSshHosts {
@@ -72,8 +96,15 @@ process.stdout.write(String(settings.ssh.servers.length))
     $updaterFile = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-ssh-settings-' + [guid]::NewGuid().ToString('N') + '.js')
     [System.IO.File]::WriteAllText($updaterFile, $updater)
     try {
-        $count = (& node $updaterFile $settingsPath $namesJson | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $count) { throw "settings update failed" }
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $count = (& node $updaterFile $settingsPath $namesJson 2>&1 | Out-String).Trim()
+        $nodeExit = $LASTEXITCODE
+        $ErrorActionPreference = $previous
+        if ($nodeExit -ne 0 -or $count -notmatch '^\d+$') {
+            Write-Warning "Desktop SSH host list was not updated ($count). Remote installation continues."
+            return
+        }
         Write-Host "Desktop lists $count SSH hosts for new projects." -ForegroundColor Green
     } finally {
         Remove-Item -LiteralPath $updaterFile -Force -ErrorAction SilentlyContinue
@@ -126,10 +157,12 @@ function New-LinuxPayload {
     $managed = Join-Path $Source 'managed\opencode.jsonc'
     $text = [System.IO.File]::ReadAllText($managed)
     $text = $text.Replace('C:/ProgramData/opencode', '__CUBEONE_ROOT__')
+    # Linux has no HKLM. The remote server reads a file that only this user can read.
     $needle = '"baseURL": "https://openrouter.ai/api/v1"'
-    $replacement = '"baseURL": "https://openrouter.ai/api/v1", "apiKey": "{file:~/.config/opencode/openrouter.key}"'
     if (-not $text.Contains($needle)) { throw "Managed config has no OpenRouter baseURL to attach the key file to." }
-    $text = $text.Replace($needle, $replacement)
+    if (-not $text.Contains('"apiKey"')) {
+        $text = $text.Replace($needle, $needle + ', "apiKey": "{file:~/.config/opencode/openrouter.key}"')
+    }
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText((Join-Path $Destination 'opencode.jsonc'), $text, $utf8)
     Copy-Item -LiteralPath (Join-Path $Source 'managed\rules') -Destination (Join-Path $Destination 'rules') -Recurse
@@ -145,8 +178,10 @@ function New-LinuxPayload {
         $path = Join-Path $Source "user\$file"
         if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination (Join-Path $userTo $file) }
     }
-    $design = Join-Path $Source 'user\vorgaben\design.md'
-    if (Test-Path -LiteralPath $design) { Copy-Item -LiteralPath $design -Destination (Join-Path $userTo 'vorgaben\design.md') }
+    $optionalRules = Join-Path $Source 'user\rules\optional'
+    if (Test-Path -LiteralPath $optionalRules) {
+        Copy-Item -LiteralPath $optionalRules -Destination (Join-Path $userTo 'rules\optional') -Recurse
+    }
 }
 
 function Send-File {
@@ -220,6 +255,19 @@ copy_tree() {
 }
 copy_tree "$STAGE/rules" "$ROOT/rules"
 copy_tree "$STAGE/vorgaben" "$ROOT/vorgaben"
+# The copy adds and overwrites. A rule removed from the package has to go too, or it stays in force.
+prune_md() {
+    [ -d "$2" ] || return 0
+    for existing in "$2"/*.md; do
+        [ -e "$existing" ] || continue
+        base=$(basename "$existing")
+        if [ ! -f "$1/$base" ]; then
+            if [ -n "$SUDO" ]; then sudo -n rm -f "$existing"; else rm -f "$existing"; fi
+        fi
+    done
+}
+prune_md "$STAGE/rules" "$ROOT/rules"
+prune_md "$STAGE/vorgaben" "$ROOT/vorgaben"
 copy_tree "$STAGE/cubeone" "$ROOT/cubeone"
 if [ -n "$SUDO" ]; then
     sed "s#__CUBEONE_ROOT__#${ROOT}#g" "$STAGE/opencode.jsonc" | sudo -n tee "$ROOT/opencode.jsonc" >/dev/null
@@ -227,7 +275,13 @@ if [ -n "$SUDO" ]; then
 else
     sed "s#__CUBEONE_ROOT__#${ROOT}#g" "$STAGE/opencode.jsonc" > "$ROOT/opencode.jsonc"
 fi
-mkdir -p "$HOME_DIR/.config/opencode/vorgaben"
+mkdir -p "$HOME_DIR/.config/opencode/vorgaben" "$HOME_DIR/.config/opencode/rules/optional"
+if [ -d "$STAGE/user/rules/optional" ]; then
+    cp -f "$STAGE/user/rules/optional/"*.md "$HOME_DIR/.config/opencode/rules/optional/"
+    prune_md "$STAGE/user/rules/optional" "$HOME_DIR/.config/opencode/rules/optional"
+fi
+# Design is an always-on optional rule now. The old copy was file-scoped and would still apply on its own.
+rm -f "$HOME_DIR/.config/opencode/vorgaben/design.md"
 # A previous run without root stored the managed file in the user config and hid the MCP servers.
 if [ -f "$HOME_DIR/.config/opencode/opencode.jsonc" ] && grep -q 'openrouter-zdr' "$HOME_DIR/.config/opencode/opencode.jsonc" && ! grep -q '"mcp"' "$HOME_DIR/.config/opencode/opencode.jsonc"; then
     mv "$HOME_DIR/.config/opencode/opencode.jsonc" "$HOME_DIR/.config/opencode/opencode.jsonc.bak-cubeone"
@@ -275,6 +329,77 @@ fi
 command -v opencode
 '@
 
+# Each desktop sends CUBEONE_PRINCIPAL. The server then keeps that person's MCP logins in their own
+# data directory, even though every SSH session is the Linux user cubeone. Without the variable the
+# existing shared server stays in place.
+$personSh = @'
+#!/bin/bash
+set -eu
+if ! sudo -n true 2>/dev/null; then
+    echo "sudo is required" >&2
+    exit 1
+fi
+if [ ! -x /usr/local/bin/opencode.bin ]; then
+    if [ ! -x /usr/local/bin/opencode ]; then
+        echo "opencode is not installed in /usr/local/bin" >&2
+        exit 1
+    fi
+    sudo -n mv /usr/local/bin/opencode /usr/local/bin/opencode.bin
+fi
+sudo -n tee /usr/local/bin/opencode >/dev/null << 'EOF'
+#!/bin/bash
+set -eu
+principal="${CUBEONE_PRINCIPAL:-}"
+if printf '%s' "$principal" | grep -Eq '^[A-Za-z0-9_-]{22,80}$'; then
+    base="${HOME}/.local"
+    export XDG_DATA_HOME="${base}/share/opencode-people/${principal}"
+    export XDG_STATE_HOME="${base}/state/opencode-people/${principal}"
+    export XDG_CACHE_HOME="${base}/cache/opencode-people/${principal}"
+    export XDG_CONFIG_HOME="${base}/config/opencode-people/${principal}"
+    mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "${XDG_CONFIG_HOME}/opencode"
+    chmod 700 "${base}/share/opencode-people" "${base}/state/opencode-people" "${base}/cache/opencode-people" "${base}/config/opencode-people" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" 2>/dev/null || true
+    shared="${HOME}/.config/opencode"
+    cfg="${XDG_CONFIG_HOME}/opencode"
+    if [ -d "$shared" ]; then
+        for item in "$shared"/*; do
+            [ -e "$item" ] || continue
+            name=$(basename "$item")
+            [ "$name" = "service.json" ] && continue
+            [ -e "${cfg}/${name}" ] && continue
+            ln -s "$item" "${cfg}/${name}"
+        done
+    fi
+    if [ ! -f "${cfg}/service.json" ]; then
+        port=""
+        state="${XDG_STATE_HOME}/opencode/service.json"
+        if [ -f "$state" ]; then
+            port=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("url","").rsplit(":",1)[-1])' "$state" 2>/dev/null || true)
+        fi
+        case "$port" in
+            ''|*[!0-9]*)
+                n=$(printf '%s' "$principal" | cksum | awk '{print $1}')
+                port=$((20000 + n % 25000))
+                ;;
+        esac
+        if [ "$port" -eq 49374 ]; then port=49375; fi
+        /usr/local/bin/opencode.bin service set port "$port"
+    fi
+fi
+exec /usr/local/bin/opencode.bin "$@"
+EOF
+sudo -n chmod 755 /usr/local/bin/opencode
+sudo -n tee /etc/ssh/sshd_config.d/cubeone-principal.conf >/dev/null << 'EOF'
+AcceptEnv CUBEONE_PRINCIPAL
+EOF
+sudo -n sshd -t
+if systemctl list-unit-files 'ssh.service' 2>/dev/null | grep -q '^ssh.service'; then
+    sudo -n systemctl reload ssh
+else
+    sudo -n systemctl reload sshd
+fi
+echo "principal wrapper installed"
+'@
+
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-remote-' + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $work 'payload'
@@ -282,10 +407,12 @@ $tar = Join-Path $work 'cubeone-opencode.tgz'
 $keyFile = Join-Path $work 'openrouter.key'
 $scriptFile = Join-Path $work 'install.sh'
 $cliInstallFile = Join-Path $work 'install-cli.sh'
+$personFile = Join-Path $work 'install-person.sh'
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 try {
     # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
     # has no business touching the desktop's full server list or WSL.
+    Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath '.ssh\config')
     if (-not $OnlyHost) {
         Register-DesktopSshHosts -ProfilePath $ProfilePath
     }
@@ -294,6 +421,7 @@ try {
     $scriptText = $installSh -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($scriptFile, $scriptText, $utf8)
     [System.IO.File]::WriteAllText($cliInstallFile, ($cliInstallSh -replace "`r`n", "`n"), $utf8)
+    [System.IO.File]::WriteAllText($personFile, ($personSh -replace "`r`n", "`n"), $utf8)
     if (Test-Path -LiteralPath $tar) { Remove-Item -LiteralPath $tar -Force }
     & tar.exe -czf $tar -C $payload .
     if ($LASTEXITCODE -ne 0) { throw "tar failed with exit $LASTEXITCODE" }
@@ -302,7 +430,7 @@ try {
     if ($key) {
         [System.IO.File]::WriteAllText($keyFile, $key, $utf8)
     } else {
-        Write-Warning 'OPENROUTER_API_KEY is not set. Remote servers get the models, but calls fail until the key file exists.'
+        Write-Warning 'HKLM\SOFTWARE\cubeone\OpenCode OpenRouterApiKey is not set. Remote servers get the models, but calls fail until the key file exists.'
         [System.IO.File]::WriteAllText($keyFile, '', $utf8)
     }
 
@@ -356,6 +484,9 @@ try {
             $cli = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $cliInstallFile -UserProfile $ProfilePath
             Invoke-Checked $cli "opencode CLI on SSH $sshHost"
             Write-Host "SSH ${sshHost}: $($cli.Out.Trim())" -ForegroundColor Green
+            $person = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $personFile -UserProfile $ProfilePath
+            Invoke-Checked $person "per-person OpenCode data directory on SSH $sshHost"
+            Write-Host "SSH ${sshHost}: $($person.Out.Trim())" -ForegroundColor Green
             # Quoted so cmd.exe (Send-File's local redirection shell) leaves the ">" for the remote
             # shell instead of redirecting ssh's own stdout into a local file named /tmp/... .
             $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-opencode.tgz`"" -InputPath $tar -UserProfile $ProfilePath
