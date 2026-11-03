@@ -443,9 +443,6 @@ $config = [ordered]@{
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp'
         }
-        [ordered]@{
-            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh'
-        }
         # Public OAuth client (PKCE, read-only scopes) registered under Administration > Applications.
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-redmine'

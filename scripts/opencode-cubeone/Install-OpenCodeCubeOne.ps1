@@ -402,7 +402,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-ssh\server.js', 'plugins\cubeone-ssh\gui-experimental.cjs', 'plugins\cubeone-redmine\server.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-redmine\server.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -414,9 +414,6 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\opencode.jsonc') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\rules') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\vorgaben') -Destination $staging -Recurse
-    # cubeone-ssh calls this by a fixed path (three levels above its own plugin folder) to set up a
-    # reachable SSH target that is still missing the opencode CLI. Keeping a copy in the locked,
-    # version-independent ProgramData tree means that path survives a Scoop update of the app itself.
     Copy-Item -LiteralPath (Join-Path $SourceDir 'Install-OpenCodeRemote.ps1') -Destination $staging
     $pluginTarget = Join-Path $staging 'cubeone\plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $pluginTarget 'dist') -Force | Out-Null
@@ -424,7 +421,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\gui-experimental.cjs') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-stt\dist\server.js') -Destination (Join-Path $pluginTarget 'dist')
     Copy-Item -LiteralPath (Join-Path $SourceDir 'plugins\cubeone-pty') -Destination (Join-Path $staging 'cubeone\plugins\cubeone-pty') -Recurse
-    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh', 'cubeone-redmine')) {
+    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-redmine')) {
         $target = Join-Path $staging "cubeone\plugins\$name"
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $SourceDir "plugins\$name") -File | Copy-Item -Destination $target

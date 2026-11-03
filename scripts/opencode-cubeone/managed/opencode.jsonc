@@ -1128,9 +1128,6 @@
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp"
     },
     {
-      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh"
-    },
-    {
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-redmine",
       "options": {
         "url": "https://project.cubeone.de",

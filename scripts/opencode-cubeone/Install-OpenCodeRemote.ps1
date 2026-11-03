@@ -15,8 +15,8 @@ param(
     [switch]$SkipWsl,
     [switch]$SkipSsh,
     [switch]$DesktopOnly,
-    # Limits the SSH part to one host alias from ~/.ssh/config. Used by cubeone-ssh for a single,
-    # on-demand or background setup instead of a full company-wide run.
+    # Limits the SSH part to one host alias from ~/.ssh/config, for a single on-demand or background setup
+    # instead of a full company-wide run.
     [string]$OnlyHost
 )
 
@@ -169,7 +169,7 @@ function New-LinuxPayload {
     Copy-Item -LiteralPath (Join-Path $Source 'managed\vorgaben') -Destination (Join-Path $Destination 'vorgaben') -Recurse
     $plugins = Join-Path $Destination 'cubeone\plugins'
     New-Item -ItemType Directory -Path $plugins -Force | Out-Null
-    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh', 'cubeone-redmine')) {
+    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-redmine')) {
         Copy-PluginPayload -Name $name -From (Join-Path $Source "plugins\$name") -To (Join-Path $plugins $name)
     }
     $userTo = Join-Path $Destination 'user'

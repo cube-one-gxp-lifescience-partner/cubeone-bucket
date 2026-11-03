@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js"
-import { ComposerPill, Plugin, type ComposerPillView } from "@opencode/plugin/gui"
+import { Command, ComposerPill, Plugin, TitlebarItem, type ComposerPillView } from "@opencode/plugin/gui"
 import { documentText } from "./brief.js"
 import { Transcriber } from "./contract"
 import { main } from "./main"
@@ -74,8 +74,11 @@ export default Plugin.define({
   i18n: {
     en: {
       dictate: "Dictate",
+      stop: "Stop recording",
       listening: "Listening…",
       transcribing: "Transcribing…",
+      "command.toggle": "Start or stop dictation",
+      "command.group": "Dictation",
       "error.microphone": "Microphone not available",
       "error.microphone.hint": "Allow microphone access for desktop apps in the Windows privacy settings.",
       "error.transcription": "Transcription failed",
@@ -105,8 +108,11 @@ export default Plugin.define({
     },
     de: {
       dictate: "Diktieren",
+      stop: "Aufnahme beenden",
       listening: "Hört zu …",
       transcribing: "Wird transkribiert …",
+      "command.toggle": "Diktat starten oder beenden",
+      "command.group": "Diktat",
       "error.microphone": "Mikrofon nicht verfügbar",
       "error.microphone.hint": "Unter Windows-Einstellungen > Datenschutz > Mikrofon den Zugriff für Desktop-Apps erlauben.",
       "error.transcription": "Transkription fehlgeschlagen",
@@ -408,6 +414,29 @@ export default Plugin.define({
         run: toggle,
       }),
     })
+
+    ctx.add(TitlebarItem, (): TitlebarItem => ({
+      id: "dictate",
+      label: phase() === "recording" ? ctx.t("stop") : phase() === "transcribing" ? ctx.t("transcribing") : ctx.t("dictate"),
+      icon: phase() === "recording" ? "stop" : "outline-audio",
+      pressed: phase() === "recording",
+      busy: phase() === "transcribing",
+      run: toggle,
+    }))
+
+    ctx.add(Command, (): Command => ({
+      id: "toggle",
+      title: ctx.t("command.toggle"),
+      group: ctx.t("command.group"),
+      keywords: "stt speech diktat sprache mikrofon voice transcribe",
+      section: "prompt",
+      bind: "mod+alt+m",
+      editable: true,
+      featured: true,
+      slash: { name: "diktat" },
+      enabled: phase() !== "transcribing",
+      run: () => toggle(),
+    }))
 
     return () => {
       stop()
