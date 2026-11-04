@@ -35,6 +35,29 @@ async function mergeMetadata(session, sessionID, key, value) {
   await session.update({ sessionID, metadata: { ...previous, [key]: value } })
 }
 
+// "user" (the user clicked stop) and "superseded" (a new message replaced the run) are normal; a Continue
+// button would be pointless there. "shutdown" (the server restarted or quit mid-turn) and "inactivity" (the
+// server gave up on a stalled run) are not the user's choice, so the GUI offers to pick the session back up.
+export const CRASH_REASONS = new Set(["shutdown", "inactivity"])
+
+// SessionInfo.outcome itself is enough for "failed"; it has no "interrupted" reason though, so the GUI pill
+// reads this flag for that case. Runs for the server's whole lifetime; a dropped event connection just ends
+// the loop; the host restarts plugins on its own reconnect, which runs setup again.
+export async function watchAbortedSessions(ctx) {
+  for await (const event of ctx.event.subscribe({ types: ["session.execution.interrupted", "session.execution.started"] })) {
+    const sessionID = event.data?.sessionID
+    if (!sessionID) continue
+    // "started" clears a stale flag, whether the user continued it themselves or with the pill below. A
+    // normal interruption (user, superseded) needs no write: it cannot have set the flag in the first place.
+    if (event.type === "session.execution.started") {
+      await mergeMetadata(ctx.session, sessionID, "cubeoneCrashed", false).catch(() => {})
+      continue
+    }
+    if (!CRASH_REASONS.has(event.data.reason)) continue
+    await mergeMetadata(ctx.session, sessionID, "cubeoneCrashed", true).catch(() => {})
+  }
+}
+
 function excerpt(text, start) {
   if (!text || typeof start !== "number") return ""
   const from = text.lastIndexOf("\n", start) + 1
@@ -64,8 +87,6 @@ export function searchResults(json, limit = MAX_RESULTS) {
   return [...results.values()]
 }
 
-let cachedKey = ""
-
 export function parseRegistryValue(output, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = new RegExp(`${escaped}\\s+REG_(?:EXPAND_)?SZ\\s+(\\S+)`).exec(String(output ?? ""))
@@ -83,38 +104,44 @@ function queryRegistry(hive, name) {
   return parseRegistryValue(output, name)
 }
 
-// The desktop server keeps the environment it was started with. The key itself
-// lives in HKLM\SOFTWARE\cubeone\OpenCode, value OpenRouterApiKey.
-function remember(key) {
+const OPENROUTER_KEY = "HKLM\\SOFTWARE\\cubeone\\OpenCode"
+
+// Registry wins over a key already sitting in the process. OpenCode's provider reads
+// OPENROUTER_API_KEY from the process and does not store it.
+export function selectOpenRouterKey(registry, env, machine) {
+  return registry || env || machine || ""
+}
+
+function publish(key) {
   if (!key) return ""
-  cachedKey = key
-  // OpenCode's provider reads this variable from the process. It is not written to disk.
   process.env.OPENROUTER_API_KEY = key
   return key
 }
 
+// Read again on every call. A key changed in the registry must show up on the next start
+// and on the next turn, without a leftover value from the first read.
 function readApiKey() {
-  if (cachedKey) return remember(cachedKey)
+  let registry = ""
   if (process.platform === "win32") {
     try {
-      const fromRegistry = queryRegistry("HKLM\\SOFTWARE\\cubeone\\OpenCode", "OpenRouterApiKey")
-      if (fromRegistry) return remember(fromRegistry)
+      registry = queryRegistry(OPENROUTER_KEY, "OpenRouterApiKey")
     } catch {
-      // The value is simply not there.
+      registry = ""
     }
   }
-  const fromEnv = process.env.OPENROUTER_API_KEY?.trim()
-  if (fromEnv) return remember(fromEnv)
-  if (process.platform !== "win32") return ""
-  for (const hive of ["HKCU\\Environment", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"]) {
-    try {
-      const value = queryRegistry(hive, "OPENROUTER_API_KEY")
-      if (value) return remember(value)
-    } catch {
-      continue
+  const env = process.env.OPENROUTER_API_KEY?.trim() || ""
+  let machine = ""
+  if (!registry && !env && process.platform === "win32") {
+    for (const hive of ["HKCU\\Environment", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"]) {
+      try {
+        machine = queryRegistry(hive, "OPENROUTER_API_KEY")
+        if (machine) break
+      } catch {
+        continue
+      }
     }
   }
-  return ""
+  return publish(selectOpenRouterKey(registry, env, machine))
 }
 
 readApiKey()
@@ -155,6 +182,7 @@ export default {
   async setup(ctx) {
     // Plannotator shares plans through its public share service unless this is set in its process.
     process.env.PLANNOTATOR_SHARE = "disabled"
+    readApiKey()
 
     const searchSettings = {
       model: option(ctx.options, "search_model", "openai/gpt-6-luna"),
@@ -178,9 +206,13 @@ export default {
       await registerSearch()
     }
     if (searchEnabled) await registerSearch()
+    void watchAbortedSessions(ctx).catch(() => {})
 
     const orchestrated = new Set()
     await ctx.session.hook("context", async (input) => {
+      // The server process stays up across sessions. Each turn reads the registry again
+      // and puts the current key where the OpenRouter provider looks for it.
+      readApiKey()
       if (searchEnabled) await ensureSearch().catch(() => {})
       if (input.agent === "orchestrator") {
         if (orchestrated.has(input.sessionID)) return

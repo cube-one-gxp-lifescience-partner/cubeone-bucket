@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js"
-import { Command, ComposerPill, Plugin, TitlebarItem, type ComposerPillView } from "@opencode/plugin/gui"
+import { Command, ComposerPill, Plugin, TitlebarItem, type ComposerPillProps, type ComposerPillView } from "@opencode/plugin/gui"
 import { documentText } from "./brief.js"
 import { Transcriber } from "./contract"
 import { main } from "./main"
@@ -86,6 +86,9 @@ export default Plugin.define({
       "error.send": "Transcript is in the chat box. Press Enter to send it.",
       limit: "Recording stopped after five minutes",
       copied: "Transcript copied to the clipboard",
+      "continue.pill": "Continue",
+      "continue.title": "The session stopped on its own, not because you stopped it",
+      "continue.prompt": "Continue.",
       "req.pill": "Requirements",
       "req.title": "Project requirements",
       "req.description": "The orchestrator turns them into a plan. You review and approve the plan before any file is written.",
@@ -120,6 +123,9 @@ export default Plugin.define({
       "error.send": "Das Transkript steht im Eingabefeld. Mit Enter geht es in den Chat.",
       limit: "Aufnahme nach fünf Minuten beendet",
       copied: "Transkript in die Zwischenablage kopiert",
+      "continue.pill": "Weiter",
+      "continue.title": "Die Sitzung ist von selbst stehen geblieben, nicht weil sie gestoppt wurde",
+      "continue.prompt": "Mach weiter.",
       "req.pill": "Anforderungen",
       "req.title": "Projektanforderungen",
       "req.description": "Der Orchestrator macht daraus einen Plan. Du prüfst und genehmigst ihn, bevor eine Datei geschrieben wird.",
@@ -393,6 +399,34 @@ export default Plugin.define({
         )
       })
     }
+
+    // Only for a session the server itself cut off (restarted mid-turn, or gave up on a stalled run), per
+    // the "cubeoneCrashed" flag watchAbortedSessions sets; never for a session the user stopped on purpose.
+    const abortedSession = (input: ComposerPillProps) => {
+      const session = input.session
+      const data = session.server.data
+      if (data.session.missing(session.id) || data.session.status(session.id) !== "idle") return undefined
+      const info = data.session.get(session.id)
+      const crashed = info.outcome === "failed" || (info.outcome === "interrupted" && info.metadata?.cubeoneCrashed === true)
+      return crashed ? { session, data } : undefined
+    }
+
+    ctx.add(ComposerPill, {
+      id: "continue",
+      show: (input): ComposerPillView | undefined => {
+        const hit = abortedSession(input)
+        if (!hit) return undefined
+        return {
+          label: ctx.t("continue.pill"),
+          icon: "outline-rotate-clockwise",
+          tone: "warning",
+          title: ctx.t("continue.title"),
+          run: () => {
+            void hit.data.session.prompt({ sessionID: hit.session.id, text: ctx.t("continue.prompt") })
+          },
+        }
+      },
+    })
 
     ctx.add(ComposerPill, {
       id: "requirements",

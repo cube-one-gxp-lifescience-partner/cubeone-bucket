@@ -28,7 +28,8 @@ function queryRegistry(hive: string, name: string) {
   return parseRegistryValue(output, name)
 }
 
-// Dictation has its own key. The model key stays OpenRouterApiKey and is never used here.
+// Dictation has its own key. Read it on every call: the desktop process keeps
+// whatever was in the environment at launch, the registry is the current value.
 function readApiKey(): string {
   if (process.platform !== "win32") return ""
   try {

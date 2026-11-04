@@ -683,42 +683,6 @@
           },
           "variants": [
             {
-              "id": "cost",
-              "body": {
-                "plugins": [
-                  {
-                    "id": "auto-router",
-                    "allowed_models": [
-                      "anthropic/claude-haiku-5.5",
-                      "anthropic/claude-opus-5.5",
-                      "anthropic/claude-sonnet-5.5",
-                      "mistralai/mistral-large-4-0",
-                      "mistralai/mistral-medium-3-5",
-                      "mistralai/mistral-small-2603",
-                      "openai/gpt-6-luna",
-                      "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "z-ai/glm-5.3"
-                    ],
-                    "cost_tier": "low"
-                  }
-                ],
-                "provider": {
-                  "zdr": true,
-                  "data_collection": "deny",
-                  "only": [
-                    "amazon-bedrock/eu-west-1",
-                    "azure/eu",
-                    "google-vertex/europe",
-                    "mistral/eu",
-                    "mistral/nvfp4/eu"
-                  ],
-                  "allow_fallbacks": false,
-                  "sort": "price"
-                }
-              }
-            },
-            {
               "id": "balanced",
               "body": {
                 "plugins": [
@@ -737,6 +701,42 @@
                       "z-ai/glm-5.3"
                     ],
                     "cost_tier": "medium"
+                  }
+                ],
+                "provider": {
+                  "zdr": true,
+                  "data_collection": "deny",
+                  "only": [
+                    "amazon-bedrock/eu-west-1",
+                    "azure/eu",
+                    "google-vertex/europe",
+                    "mistral/eu",
+                    "mistral/nvfp4/eu"
+                  ],
+                  "allow_fallbacks": false,
+                  "sort": "price"
+                }
+              }
+            },
+            {
+              "id": "cost",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "anthropic/claude-haiku-5.5",
+                      "anthropic/claude-opus-5.5",
+                      "anthropic/claude-sonnet-5.5",
+                      "mistralai/mistral-large-4-0",
+                      "mistralai/mistral-medium-3-5",
+                      "mistralai/mistral-small-2603",
+                      "openai/gpt-6-luna",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6.1-terra",
+                      "z-ai/glm-5.3"
+                    ],
+                    "cost_tier": "low"
                   }
                 ],
                 "provider": {
@@ -1126,6 +1126,9 @@
     },
     {
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp"
+    },
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-cursor-skills"
     },
     {
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-redmine",

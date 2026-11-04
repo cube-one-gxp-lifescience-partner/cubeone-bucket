@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import plugin, { parseRegistryValue, searchResults } from "../src/server.js"
+import plugin, { parseRegistryValue, searchResults, selectOpenRouterKey, watchAbortedSessions } from "../src/server.js"
 
 function fakeContext(metadata = {}) {
   const hooks = {}
   const updates = []
   let current = { ...metadata }
+  const events = []
   const ctx = {
     options: {},
     searchProviders: [],
@@ -33,9 +34,50 @@ function fakeContext(metadata = {}) {
         current = input.metadata
       },
     },
+    event: {
+      async *subscribe() {
+        for (const event of events) yield event
+      },
+    },
   }
-  return { ctx, hooks, updates }
+  return { ctx, hooks, updates, events }
 }
+
+test("the registry key replaces a key already in the process", () => {
+  assert.equal(selectOpenRouterKey("from-registry", "from-env", "from-machine"), "from-registry")
+  assert.equal(selectOpenRouterKey("", "from-env", "from-machine"), "from-env")
+  assert.equal(selectOpenRouterKey("", "", "from-machine"), "from-machine")
+  assert.equal(selectOpenRouterKey("", "", ""), "")
+})
+
+test("watchAbortedSessions flags a session the server itself cut off", async () => {
+  const { ctx, updates, events } = fakeContext()
+  events.push({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "shutdown" } })
+  await watchAbortedSessions(ctx)
+  assert.deepEqual(updates.at(-1), { sessionID: "ses_1", metadata: { cubeoneCrashed: true } })
+})
+
+test("watchAbortedSessions flags a run the server gave up on for inactivity", async () => {
+  const { ctx, updates, events } = fakeContext()
+  events.push({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "inactivity" } })
+  await watchAbortedSessions(ctx)
+  assert.deepEqual(updates.at(-1), { sessionID: "ses_1", metadata: { cubeoneCrashed: true } })
+})
+
+test("watchAbortedSessions leaves a user-stopped or superseded run alone", async () => {
+  const { ctx, updates, events } = fakeContext()
+  events.push({ type: "session.execution.interrupted", data: { sessionID: "ses_1", reason: "user" } })
+  events.push({ type: "session.execution.interrupted", data: { sessionID: "ses_2", reason: "superseded" } })
+  await watchAbortedSessions(ctx)
+  assert.equal(updates.length, 0)
+})
+
+test("watchAbortedSessions clears the flag once the session runs again", async () => {
+  const { ctx, updates, events } = fakeContext({ cubeoneCrashed: true })
+  events.push({ type: "session.execution.started", data: { sessionID: "ses_1" } })
+  await watchAbortedSessions(ctx)
+  assert.deepEqual(updates.at(-1), { sessionID: "ses_1", metadata: { cubeoneCrashed: false } })
+})
 
 test("parseRegistryValue reads one registry value and nothing around it", () => {
   const output = [

@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-cursor-skills",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: translates a project's Cursor rules into OpenCode Skills, for that project only",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/cursor-skills.test.js"
+  }
+}

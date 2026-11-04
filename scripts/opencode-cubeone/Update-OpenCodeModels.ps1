@@ -284,9 +284,11 @@ else {
         }
         limit        = [ordered]@{ context = [int]$minContext; output = [int]$minOutput }
         body         = & $autoBody 'medium'
+        # Balanced listed first: it is also the untouched default body above, so it matches what a session
+        # gets when no variant is picked at all.
         variants     = @(
-            [ordered]@{ id = 'cost'; body = (& $autoBody 'low') }
             [ordered]@{ id = 'balanced'; body = (& $autoBody 'medium') }
+            [ordered]@{ id = 'cost'; body = (& $autoBody 'low') }
             [ordered]@{ id = 'intelligence'; body = (& $autoBody 'max') }
         )
     }
@@ -442,6 +444,10 @@ $config = [ordered]@{
         }
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp'
+        }
+        # Translates a project's own .cursor/rules/*.mdc into OpenCode Skills, scoped to that project only.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-cursor-skills'
         }
         # Public OAuth client (PKCE, read-only scopes) registered under Administration > Applications.
         [ordered]@{
