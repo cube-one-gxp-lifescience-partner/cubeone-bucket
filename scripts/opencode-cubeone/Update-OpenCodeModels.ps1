@@ -459,6 +459,10 @@ $config = [ordered]@{
         }
         $ContextPruningPackage
         $MemoryPackage
+        # Runs after DCP. Removes compact ids and the compression reminder from the text the chat shows.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-dcp-view'
+        }
     )
 }
 

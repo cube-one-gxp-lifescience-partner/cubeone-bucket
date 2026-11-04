@@ -40,7 +40,7 @@ try {
         }
     }
     Copy-Item -LiteralPath $ptySource -Destination (Join-Path $staging 'plugins\cubeone-pty') -Recurse
-    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-cursor-skills', 'cubeone-redmine')) {
+    foreach ($name in @('cubeone-vorgaben', 'cubeone-mcp', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view')) {
         $target = Join-Path $staging "plugins\$name"
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $root "plugins\$name") -File | Copy-Item -Destination $target

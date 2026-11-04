@@ -1138,6 +1138,9 @@
       }
     },
     "@tarquinen/opencode-dcp@3.2.0",
-    "opencode-mem@2.39.0"
+    "opencode-mem@2.39.0",
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-dcp-view"
+    }
   ]
 }

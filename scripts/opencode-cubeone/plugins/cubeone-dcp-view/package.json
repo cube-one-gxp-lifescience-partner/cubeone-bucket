@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-dcp-view",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: hides DCP compact placeholders and compression guidance from the chat",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/display.test.js"
+  }
+}
