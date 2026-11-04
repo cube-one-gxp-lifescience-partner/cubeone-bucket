@@ -15,6 +15,8 @@ param(
     [switch]$SkipWsl,
     [switch]$SkipSsh,
     [switch]$DesktopOnly,
+    # Writes only the OpenRouter key from HKLM. No plugins, no desktop settings, no CLI install.
+    [switch]$KeyOnly,
     # Limits the SSH part to one host alias from ~/.ssh/config, for a single on-demand or background setup
     # instead of a full company-wide run.
     [string]$OnlyHost
@@ -400,6 +402,111 @@ fi
 echo "principal wrapper installed"
 '@
 
+function Update-OpenRouterKeyOnTargets {
+    $key = Get-OpenRouterKey
+    if (-not $key) { throw 'HKLM\SOFTWARE\cubeone\OpenCode OpenRouterApiKey is not set.' }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-key-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    $keyFile = Join-Path $work 'openrouter.key'
+    $linuxScript = Join-Path $work 'install-key.sh'
+    [System.IO.File]::WriteAllText($keyFile, $key, $utf8)
+    $linuxSh = @'
+#!/bin/bash
+set -eu
+trap 'rm -f /tmp/cubeone-openrouter.key' EXIT
+if [ ! -s /tmp/cubeone-openrouter.key ]; then
+  echo "key file missing" >&2
+  exit 1
+fi
+umask 077
+mkdir -p "$HOME/.config/opencode"
+cat /tmp/cubeone-openrouter.key > "$HOME/.config/opencode/openrouter.key"
+chmod 600 "$HOME/.config/opencode/openrouter.key"
+if [ -d "$HOME/.local/config/opencode-people" ]; then
+  find "$HOME/.local/config/opencode-people" -type f -path '*/opencode/openrouter.key' -exec cp "$HOME/.config/opencode/openrouter.key" {} \; -exec chmod 600 {} \;
+fi
+referenced=no
+for candidate in "$HOME/.config/opencode/opencode.jsonc" /etc/opencode/opencode.jsonc; do
+  if [ -f "$candidate" ] && grep -q 'openrouter.key' "$candidate"; then
+    referenced=yes
+  fi
+done
+bytes=$(wc -c < "$HOME/.config/opencode/openrouter.key")
+printf 'bytes=%s referenced=%s\n' "$bytes" "$referenced"
+'@
+    [System.IO.File]::WriteAllText($linuxScript, ($linuxSh -replace "`r`n", "`n"), $utf8)
+    $windowsSh = @'
+$k = [Console]::In.ReadToEnd().Trim()
+if (-not $k -or $k.Contains("`n") -or $k.Contains("`r")) { throw 'key missing' }
+[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', $k, 'User')
+$hklm = 'skipped'
+try {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', [Microsoft.Win32.RegistryView]::Registry64)
+    $sub = $base.CreateSubKey('SOFTWARE\cubeone\OpenCode')
+    $sub.SetValue('OpenRouterApiKey', $k, [Microsoft.Win32.RegistryValueKind]::String)
+    $sub.Close()
+    $base.Close()
+    $hklm = 'set'
+} catch {
+    $hklm = 'skipped'
+}
+Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
+'@
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($windowsSh))
+    $expected = $key.Length
+    try {
+        if (-not $SkipWsl -and -not $OnlyHost) {
+            foreach ($distro in @(Get-WslDistros)) {
+                try {
+                    $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -c `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile
+                    Invoke-Checked $recv "Key file to WSL $distro"
+                    $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -s" -InputPath $linuxScript
+                    Invoke-Checked $recv "Key on WSL $distro"
+                    Write-Host "WSL ${distro}: $($recv.Out.Trim())" -ForegroundColor Green
+                } catch {
+                    Write-Warning "WSL ${distro}: $($_.Exception.Message)"
+                }
+            }
+        }
+        if ($SkipSsh) { return }
+        $sshConfig = Join-Path $ProfilePath '.ssh\config'
+        $sshTargets = @(Get-SshHosts -ConfigPath $sshConfig)
+        if ($OnlyHost) { $sshTargets = @($sshTargets | Where-Object { $_ -eq $OnlyHost }) }
+        foreach ($sshHost in $sshTargets) {
+            $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
+            try {
+                $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $keyFile -UserProfile $ProfilePath
+                if ($probe.Code -eq 0 -and $probe.Out.Trim() -eq 'Linux') {
+                    $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile -UserProfile $ProfilePath
+                    Invoke-Checked $recv "Key file to SSH $sshHost"
+                    $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $linuxScript -UserProfile $ProfilePath
+                    Invoke-Checked $recv "Key on SSH $sshHost"
+                    $line = $recv.Out.Trim()
+                    if ($line -notmatch "bytes=$expected(\s|$)") {
+                        Write-Warning "SSH ${sshHost}: $line (expected $expected bytes)"
+                    } else {
+                        Write-Host "SSH ${sshHost}: $line" -ForegroundColor Green
+                    }
+                    continue
+                }
+                $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs powershell.exe -NoProfile -EncodedCommand $encoded" -InputPath $keyFile -UserProfile $ProfilePath
+                Invoke-Checked $recv "Key on SSH $sshHost"
+                $line = $recv.Out.Trim()
+                if ($line -notmatch "bytes=$expected(\s|$)") {
+                    Write-Warning "SSH ${sshHost}: $line (expected $expected bytes)"
+                } else {
+                    Write-Host "SSH ${sshHost}: $line" -ForegroundColor Green
+                }
+            } catch {
+                Write-Warning "SSH ${sshHost}: $($_.Exception.Message)"
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-remote-' + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $work 'payload'
@@ -410,6 +517,10 @@ $cliInstallFile = Join-Path $work 'install-cli.sh'
 $personFile = Join-Path $work 'install-person.sh'
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 try {
+    if ($KeyOnly) {
+        Update-OpenRouterKeyOnTargets
+        return
+    }
     # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
     # has no business touching the desktop's full server list or WSL.
     Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath '.ssh\config')
