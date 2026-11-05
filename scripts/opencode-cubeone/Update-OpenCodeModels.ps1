@@ -75,6 +75,23 @@ $ReadOnly = @(
     [ordered]@{ action = 'subagent'; resource = '*'; effect = 'deny' }
 )
 $Agents = [ordered]@{
+    ask          = [ordered]@{
+        mode        = 'primary'
+        description = 'Answers questions and explains code without changing files or running commands.'
+        permissions = @(
+            [ordered]@{ action = '*'; resource = '*'; effect = 'deny' }
+            [ordered]@{ action = 'read'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'read'; resource = '*.env'; effect = 'deny' }
+            [ordered]@{ action = 'read'; resource = '*.env.*'; effect = 'deny' }
+            [ordered]@{ action = 'glob'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'grep'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'external_directory'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'websearch'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'webfetch'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'question'; resource = '*'; effect = 'allow' }
+            [ordered]@{ action = 'skill'; resource = '*'; effect = 'allow' }
+        )
+    }
     orchestrator = [ordered]@{
         model       = '~anthropic/claude-opus-latest'
         mode        = 'primary'
@@ -491,6 +508,12 @@ $config = [ordered]@{
         }
     }
     commands     = [ordered]@{
+        ask      = [ordered]@{
+            description = 'Ask questions and explain code without making changes'
+            agent       = 'ask'
+            subagent    = $false
+            template    = 'Answer the following question without making changes. If no question is supplied, ask what the user wants to know. Stay in Ask mode for follow-up questions. Question: $ARGUMENTS'
+        }
         pipeline = [ordered]@{
             description = 'Pipelines dieses Repositorys in cube git prüfen und Fehler beheben'
             template    = $PipelineCommand

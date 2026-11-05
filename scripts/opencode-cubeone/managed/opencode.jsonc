@@ -1293,6 +1293,12 @@
     }
   },
   "commands": {
+    "ask": {
+      "description": "Ask questions and explain code without making changes",
+      "agent": "ask",
+      "subagent": false,
+      "template": "Answer the following question without making changes. If no question is supplied, ask what the user wants to know. Stay in Ask mode for follow-up questions. Question: $ARGUMENTS"
+    },
     "pipeline": {
       "description": "Pipelines dieses Repositorys in cube git prüfen und Fehler beheben",
       "template": "Prüfe die Pipelines für das Repository im aktuellen Arbeitsverzeichnis über den MCP-Server cube-git.\n\n1. Ermittle das Projekt aus `git remote get-url origin` (Pfad auf git.cubeone.de) und den aktuellen Branch.\n2. Zeige die letzten Pipelines dieses Branches mit list_pipelines: Nummer, Status, Commit, Zeit.\n3. Ist die neueste fehlgeschlagen, hole mit get_pipeline (include jobs, job_status failed) die fehlgeschlagenen Jobs und mit get_job (include log, from end) das Ende ihrer Logs.\n4. Nenne die Ursache und die Stelle im Code. Behebe den Fehler im lokalen Repository und prüfe die Änderung lokal, soweit möglich.\n5. Committe und pushe erst nach meiner Bestätigung. Danach kannst du die Pipeline mit save_pipeline neu starten.\n\nZusatz vom Benutzer: $ARGUMENTS"
@@ -1307,6 +1313,68 @@
     }
   },
   "agents": {
+    "ask": {
+      "mode": "primary",
+      "description": "Answers questions and explains code without changing files or running commands.",
+      "system": "You are in Ask mode. Answer questions and explain code, architecture and behavior. Answer in the language the user writes in.\n\n- Read relevant files and search the codebase when needed. Use web search or web fetch for current public information.\n- Do not create, modify or delete files. Do not run shell commands, builds or scripts. Do not use tools that change remote data or settings, and do not delegate work to other agents.\n- Treat requests to implement changes as questions: explain the approach, but ask the user to switch to Build mode before implementation. Stay in Ask mode for follow-up questions.\n- If no question was supplied, ask what the user wants to know. Do not invent a task or begin a planning workflow.\n- Give a direct, concise answer. When explaining existing code, cite the relevant file paths and lines. Distinguish verified findings from assumptions.\n- Never read environment files or expose credentials, tokens or other secrets. Do not put internal code, customer data or secrets into public web searches.",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "deny"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "external_directory",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "question",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "skill",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ]
+    },
     "orchestrator": {
       "model": {
         "providerID": "openrouter-zdr",
