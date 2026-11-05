@@ -1,6 +1,7 @@
 // Managed by the cubeone-bucket opencode-desktop manifest. Do not edit on the machine.
 // Regenerate with scripts\opencode-cubeone\Update-OpenCodeModels.ps1.
 // Model list checked against https://openrouter.ai/api/v1/endpoints/zdr on 2026-11-02. EU endpoints are pinned where one exists.
+// Auto (ZDR, SALE) follows the discounted models on that list and is refreshed when OpenCode starts.
 {
   "$schema": "https://opencode.ai/config.json",
   "update": "disable",
@@ -32,6 +33,16 @@
       "models": {
         "~anthropic/claude-opus-latest": {
           "name": "Claude Opus Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -73,6 +84,16 @@
         },
         "~anthropic/claude-sonnet-latest": {
           "name": "Claude Sonnet Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -114,6 +135,16 @@
         },
         "~anthropic/claude-haiku-latest": {
           "name": "Claude Haiku Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -155,6 +186,16 @@
         },
         "~openai/gpt-sol-latest": {
           "name": "GPT Sol Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -195,6 +236,16 @@
         },
         "~openai/gpt-terra-latest": {
           "name": "GPT Terra Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -235,6 +286,16 @@
         },
         "~openai/gpt-luna-latest": {
           "name": "GPT Luna Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -275,6 +336,16 @@
         },
         "~x-ai/grok-latest": {
           "name": "Grok Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -304,6 +375,15 @@
         },
         "mistralai/mistral-large-4-0": {
           "name": "Mistral Large 4",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -344,6 +424,16 @@
         },
         "mistralai/mistral-medium-3-5": {
           "name": "Mistral Medium 3.5",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -384,6 +474,15 @@
         },
         "mistralai/mistral-small-2603": {
           "name": "Mistral Small 4",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -424,6 +523,14 @@
         },
         "~deepseek/deepseek-pro-latest": {
           "name": "DeepSeek Pro Latest",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -452,6 +559,15 @@
         },
         "~deepseek/deepseek-flash-latest": {
           "name": "DeepSeek Flash Latest",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -481,6 +597,15 @@
         },
         "moonshotai/kimi-k3.1-pro": {
           "name": "Kimi K3.1 Pro",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -510,6 +635,14 @@
         },
         "~z-ai/glm-latest": {
           "name": "GLM Latest",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -549,6 +682,14 @@
         },
         "qwen/qwen3.8-2.4t-a95b": {
           "name": "Qwen3.8 2.4T A95B",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -577,6 +718,15 @@
         },
         "qwen/qwen3.8-27b": {
           "name": "Qwen3.8 27B",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -606,6 +756,15 @@
         },
         "minimax/minimax-m3.1-flash": {
           "name": "MiniMax M3.1 Flash",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
@@ -635,10 +794,21 @@
         },
         "openrouter/auto": {
           "name": "Auto (ZDR, EU)",
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "capabilities": {
             "tools": true,
             "input": [
-              "text"
+              "text",
+              "image"
             ],
             "output": [
               "text"
@@ -793,6 +963,253 @@
           ]
         }
       }
+    },
+    "openrouter-zdr-sale": {
+      "name": "OpenRouter (ZDR, SALE)",
+      "package": "@opencode/ai/providers/openrouter",
+      "env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "settings": {
+        "baseURL": "https://openrouter.ai/api/v1"
+      },
+      "headers": {
+        "HTTP-Referer": "https://cubeone.de",
+        "X-Title": "OpenCode cube one"
+      },
+      "body": {
+        "provider": {
+          "zdr": true,
+          "data_collection": "deny"
+        }
+      },
+      "models": {
+        "openrouter/auto": {
+          "name": "Auto (ZDR, SALE)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          },
+          "body": {
+            "plugins": [
+              {
+                "id": "auto-router",
+                "allowed_models": [
+                  "deepseek/deepseek-v4-flash",
+                  "deepseek/deepseek-v4-flash-0731",
+                  "deepseek/deepseek-v4-flash-vision-exp",
+                  "deepseek/deepseek-v4-pro-0813",
+                  "deepseek/deepseek-v4.1-flash",
+                  "deepseek/deepseek-v4.1-flash-1017",
+                  "google/gemma-4-31b-it",
+                  "inception/mercury-2.5",
+                  "inception/mercury-3",
+                  "inclusionai/ling-3.0-flash",
+                  "inclusionai/ling-3.1-flash",
+                  "minimax/minimax-m2",
+                  "minimax/minimax-m2.7",
+                  "minimax/minimax-m3.1-flash",
+                  "mistralai/mistral-nemo",
+                  "moonshotai/kimi-k2.5",
+                  "moonshotai/kimi-k2.7-code",
+                  "moonshotai/kimi-k3",
+                  "moonshotai/kimi-k3.1-pro",
+                  "nvidia/nemotron-3.5-lightning",
+                  "qwen/qwen3.8-2.4t-a95b",
+                  "qwen/qwen3.8-27b",
+                  "tencent/hy4",
+                  "upstage/solar-mini4",
+                  "upstage/solar-pro4",
+                  "xiaomi/mimo-v2.6-pro",
+                  "z-ai/glm-4.7",
+                  "z-ai/glm-5.1",
+                  "z-ai/glm-5.2",
+                  "z-ai/glm-5.3",
+                  "z-ai/glm-5.3-flash"
+                ],
+                "cost_tier": "medium"
+              }
+            ],
+            "provider": {
+              "zdr": true,
+              "data_collection": "deny",
+              "allow_fallbacks": false,
+              "sort": "price"
+            }
+          },
+          "variants": [
+            {
+              "id": "balanced",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "deepseek/deepseek-v4-flash",
+                      "deepseek/deepseek-v4-flash-0731",
+                      "deepseek/deepseek-v4-flash-vision-exp",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "deepseek/deepseek-v4.1-flash-1017",
+                      "google/gemma-4-31b-it",
+                      "inception/mercury-2.5",
+                      "inception/mercury-3",
+                      "inclusionai/ling-3.0-flash",
+                      "inclusionai/ling-3.1-flash",
+                      "minimax/minimax-m2",
+                      "minimax/minimax-m2.7",
+                      "minimax/minimax-m3.1-flash",
+                      "mistralai/mistral-nemo",
+                      "moonshotai/kimi-k2.5",
+                      "moonshotai/kimi-k2.7-code",
+                      "moonshotai/kimi-k3",
+                      "moonshotai/kimi-k3.1-pro",
+                      "nvidia/nemotron-3.5-lightning",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "tencent/hy4",
+                      "upstage/solar-mini4",
+                      "upstage/solar-pro4",
+                      "xiaomi/mimo-v2.6-pro",
+                      "z-ai/glm-4.7",
+                      "z-ai/glm-5.1",
+                      "z-ai/glm-5.2",
+                      "z-ai/glm-5.3",
+                      "z-ai/glm-5.3-flash"
+                    ],
+                    "cost_tier": "medium"
+                  }
+                ],
+                "provider": {
+                  "zdr": true,
+                  "data_collection": "deny",
+                  "allow_fallbacks": false,
+                  "sort": "price"
+                }
+              }
+            },
+            {
+              "id": "cost",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "deepseek/deepseek-v4-flash",
+                      "deepseek/deepseek-v4-flash-0731",
+                      "deepseek/deepseek-v4-flash-vision-exp",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "deepseek/deepseek-v4.1-flash-1017",
+                      "google/gemma-4-31b-it",
+                      "inception/mercury-2.5",
+                      "inception/mercury-3",
+                      "inclusionai/ling-3.0-flash",
+                      "inclusionai/ling-3.1-flash",
+                      "minimax/minimax-m2",
+                      "minimax/minimax-m2.7",
+                      "minimax/minimax-m3.1-flash",
+                      "mistralai/mistral-nemo",
+                      "moonshotai/kimi-k2.5",
+                      "moonshotai/kimi-k2.7-code",
+                      "moonshotai/kimi-k3",
+                      "moonshotai/kimi-k3.1-pro",
+                      "nvidia/nemotron-3.5-lightning",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "tencent/hy4",
+                      "upstage/solar-mini4",
+                      "upstage/solar-pro4",
+                      "xiaomi/mimo-v2.6-pro",
+                      "z-ai/glm-4.7",
+                      "z-ai/glm-5.1",
+                      "z-ai/glm-5.2",
+                      "z-ai/glm-5.3",
+                      "z-ai/glm-5.3-flash"
+                    ],
+                    "cost_tier": "low"
+                  }
+                ],
+                "provider": {
+                  "zdr": true,
+                  "data_collection": "deny",
+                  "allow_fallbacks": false,
+                  "sort": "price"
+                }
+              }
+            },
+            {
+              "id": "intelligence",
+              "body": {
+                "plugins": [
+                  {
+                    "id": "auto-router",
+                    "allowed_models": [
+                      "deepseek/deepseek-v4-flash",
+                      "deepseek/deepseek-v4-flash-0731",
+                      "deepseek/deepseek-v4-flash-vision-exp",
+                      "deepseek/deepseek-v4-pro-0813",
+                      "deepseek/deepseek-v4.1-flash",
+                      "deepseek/deepseek-v4.1-flash-1017",
+                      "google/gemma-4-31b-it",
+                      "inception/mercury-2.5",
+                      "inception/mercury-3",
+                      "inclusionai/ling-3.0-flash",
+                      "inclusionai/ling-3.1-flash",
+                      "minimax/minimax-m2",
+                      "minimax/minimax-m2.7",
+                      "minimax/minimax-m3.1-flash",
+                      "mistralai/mistral-nemo",
+                      "moonshotai/kimi-k2.5",
+                      "moonshotai/kimi-k2.7-code",
+                      "moonshotai/kimi-k3",
+                      "moonshotai/kimi-k3.1-pro",
+                      "nvidia/nemotron-3.5-lightning",
+                      "qwen/qwen3.8-2.4t-a95b",
+                      "qwen/qwen3.8-27b",
+                      "tencent/hy4",
+                      "upstage/solar-mini4",
+                      "upstage/solar-pro4",
+                      "xiaomi/mimo-v2.6-pro",
+                      "z-ai/glm-4.7",
+                      "z-ai/glm-5.1",
+                      "z-ai/glm-5.2",
+                      "z-ai/glm-5.3",
+                      "z-ai/glm-5.3-flash"
+                    ],
+                    "cost_tier": "max"
+                  }
+                ],
+                "provider": {
+                  "zdr": true,
+                  "data_collection": "deny",
+                  "allow_fallbacks": false,
+                  "sort": "price"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "policies": [
@@ -804,6 +1221,11 @@
     {
       "action": "provider.use",
       "resource": "openrouter-zdr",
+      "effect": "allow"
+    },
+    {
+      "action": "provider.use",
+      "resource": "openrouter-zdr-sale",
       "effect": "allow"
     },
     {
@@ -819,6 +1241,11 @@
     {
       "action": "integration.use",
       "resource": "openrouter-zdr",
+      "effect": "allow"
+    },
+    {
+      "action": "integration.use",
+      "resource": "openrouter-zdr-sale",
       "effect": "allow"
     },
     {
@@ -1120,6 +1547,9 @@
             "qwen/qwen3.8-27b",
             "minimax/minimax-m3.1-flash",
             "openrouter/auto"
+          ],
+          "openrouter-zdr-sale": [
+            "openrouter/auto"
           ]
         }
       }
@@ -1139,6 +1569,9 @@
     },
     "@tarquinen/opencode-dcp@3.2.0",
     "opencode-mem@2.39.0",
+    {
+      "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-sale"
+    },
     {
       "package": "C:/ProgramData/opencode/cubeone/plugins/cubeone-dcp-view"
     }

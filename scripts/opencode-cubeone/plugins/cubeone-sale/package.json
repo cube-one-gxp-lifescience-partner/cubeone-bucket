@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-sale",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: keeps Auto (ZDR, SALE) on the models OpenRouter currently discounts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/sale.test.js"
+  }
+}

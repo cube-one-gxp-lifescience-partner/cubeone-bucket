@@ -29,6 +29,11 @@ $DefaultModel = '~anthropic/claude-sonnet-latest'
 # allowed_models allowlist (set below, after $CuratedModels is resolved) so it can only ever land
 # on one of our vetted ZDR models, never on an unreviewed sibling model from the same provider.
 $AutoRouterModel = 'openrouter/auto'
+# OpenCode sends the model key to OpenRouter as the model id. A second key on the EU provider would also be
+# openrouter/auto, so SALE gets its own provider with the same key and the same ZDR settings.
+$SaleProviderId = 'openrouter-zdr-sale'
+$SaleModelKey = 'openrouter/auto'
+$saleModels = [ordered]@{}
 # ~author/family-latest follows the newest model of that family. Families without such an alias, and
 # Kimi, stay on a concrete id: ~moonshotai/kimi-latest currently points at kimi-k3, which is older
 # than kimi-k3.1-pro. ~deepseek/deepseek-v4-flash-latest points at the older July snapshot, so the
@@ -172,7 +177,16 @@ foreach ($id in $CuratedModels) {
         continue
     }
 
-    $modalities = @($served.architecture.input_modalities | Where-Object { $_ -in @('text', 'image') })
+    # OpenCode reads modalities, not capabilities. Without it, a pasted screenshot is replaced
+    # by "this model does not support image input" before the model sees the file.
+    # OpenRouter calls a PDF "file"; OpenCode's modality name is "pdf".
+    $openCodeInput = [System.Collections.Generic.List[string]]::new()
+    [void]$openCodeInput.Add('text')
+    foreach ($name in @($served.architecture.input_modalities)) {
+        if ($name -eq 'image' -and -not $openCodeInput.Contains('image')) { [void]$openCodeInput.Add('image') }
+        if (($name -eq 'file' -or $name -eq 'pdf') -and -not $openCodeInput.Contains('pdf')) { [void]$openCodeInput.Add('pdf') }
+    }
+    $modalities = @($openCodeInput)
     $capabilities = [ordered]@{
         tools  = $true
         input  = $modalities
@@ -192,6 +206,7 @@ foreach ($id in $CuratedModels) {
     $pricedFrom = $endpoints
     $entry = [ordered]@{
         name         = ($model.name -replace '^[^:]+:\s*', '')
+        modalities   = [ordered]@{ input = @($modalities); output = @('text') }
         capabilities = $capabilities
         limit        = [ordered]@{ context = [int]$served.context_length; output = $output }
     }
@@ -275,11 +290,22 @@ else {
         }
         $body
     }
+    # Auto may be routed to a model that can see a screenshot or a PDF. Declaring only text
+    # makes OpenCode drop the attachment and the answer says the screenshot cannot be read.
+    $autoInput = [System.Collections.Generic.List[string]]::new()
+    [void]$autoInput.Add('text')
+    foreach ($model in $autoModels) {
+        foreach ($name in @($model.modalities.input)) {
+            if (-not $autoInput.Contains([string]$name)) { [void]$autoInput.Add([string]$name) }
+        }
+    }
+    $autoModalities = @($autoInput)
     $models[$AutoRouterModel] = [ordered]@{
         name         = 'Auto (ZDR, EU)'
+        modalities   = [ordered]@{ input = $autoModalities; output = @('text') }
         capabilities = [ordered]@{
             tools  = $true
-            input  = @('text')
+            input  = $autoModalities
             output = @('text')
         }
         limit        = [ordered]@{ context = [int]$minContext; output = [int]$minOutput }
@@ -294,6 +320,76 @@ else {
     }
 }
 
+# Sale follows the live discount flag, not the curated list. pricing.discount is 0 when an endpoint
+# is not on sale. The baked allow-list is the fallback; cubeone-sale replaces it at every OpenCode start
+# because the discounted set changes between runs of this script. No EU pin: provider.only stays absent.
+$saleIds = @(
+    $zdrEndpoints |
+        Where-Object {
+            -not $_.safety_retention -and
+            ($_.supported_parameters -contains 'tools') -and
+            ([double]$_.pricing.discount -gt 0) -and
+            $_.model_id -and
+            ([string]$_.model_id -notlike 'openrouter/*')
+        } |
+        ForEach-Object { [string]$_.model_id } |
+        Sort-Object -Unique
+)
+if ($saleIds.Count -eq 0) {
+    Write-Warning 'No discounted strict ZDR model with tools. Auto (ZDR, SALE) was skipped.'
+}
+else {
+    $saleCatalog = @($catalog | Where-Object { $saleIds -contains $_.id })
+    $saleInput = [System.Collections.Generic.List[string]]::new()
+    [void]$saleInput.Add('text')
+    foreach ($served in $saleCatalog) {
+        foreach ($name in @($served.architecture.input_modalities)) {
+            if ($name -eq 'image' -and -not $saleInput.Contains('image')) { [void]$saleInput.Add('image') }
+            if (($name -eq 'file' -or $name -eq 'pdf') -and -not $saleInput.Contains('pdf')) { [void]$saleInput.Add('pdf') }
+        }
+    }
+    $saleModalities = @($saleInput)
+    $saleContexts = @($saleCatalog | ForEach-Object { [int]$_.context_length } | Where-Object { $_ -gt 0 })
+    $saleOutputs = @($saleCatalog | ForEach-Object { [int]$_.top_provider.max_completion_tokens } | Where-Object { $_ -gt 0 })
+    $saleContext = if ($saleContexts.Count -gt 0) { ($saleContexts | Measure-Object -Minimum).Minimum } else { 131072 }
+    $saleOutput = if ($saleOutputs.Count -gt 0) { ($saleOutputs | Measure-Object -Minimum).Minimum } else { 16384 }
+    $saleBody = {
+        param([string]$Tier)
+        [ordered]@{
+            plugins  = @(
+                [ordered]@{
+                    id             = 'auto-router'
+                    allowed_models = @($saleIds)
+                    cost_tier      = $Tier
+                }
+            )
+            provider = [ordered]@{
+                zdr             = $true
+                data_collection = 'deny'
+                allow_fallbacks = $false
+                sort            = 'price'
+            }
+        }
+    }
+    $saleModels[$SaleModelKey] = [ordered]@{
+        name         = 'Auto (ZDR, SALE)'
+        modalities   = [ordered]@{ input = $saleModalities; output = @('text') }
+        capabilities = [ordered]@{
+            tools  = $true
+            input  = $saleModalities
+            output = @('text')
+        }
+        limit        = [ordered]@{ context = [int]$saleContext; output = [int]$saleOutput }
+        body         = & $saleBody 'medium'
+        variants     = @(
+            [ordered]@{ id = 'balanced'; body = (& $saleBody 'medium') }
+            [ordered]@{ id = 'cost'; body = (& $saleBody 'low') }
+            [ordered]@{ id = 'intelligence'; body = (& $saleBody 'max') }
+        )
+    }
+    Write-Host ("Auto (ZDR, SALE)  ->  {0} discounted models" -f $saleIds.Count)
+}
+
 $searchConcrete = if ($concreteOf.ContainsKey($SearchModel)) { $concreteOf[$SearchModel] } else { $SearchModel }
 $searchReady = @($zdrEndpoints | Where-Object {
         $_.model_id -eq $searchConcrete -and $_.tag -eq $SearchEndpoint -and -not $_.safety_retention -and
@@ -306,21 +402,23 @@ if (-not $searchReady) {
 $agentConfig = [ordered]@{}
 foreach ($name in $Agents.Keys) {
     $agent = $Agents[$name]
-    $modelId = $agent.model
-    if (-not $models.Contains($modelId)) {
-        Write-Warning "Agent $name uses $modelId, which did not pass the ZDR check. It falls back to $DefaultModel."
-        $modelId = $DefaultModel
-    }
     if ($name -eq 'researcher' -and -not $searchReady) {
         continue
     }
-    $agentConfig[$name] = [ordered]@{
-        model       = [ordered]@{ providerID = $ProviderId; model = $modelId }
-        mode        = $agent.mode
-        description = $agent.description
-        system      = (Get-Content -LiteralPath (Join-Path $AgentRoot "$name.md") -Raw -Encoding utf8).Trim()
-        permissions = @($agent.permissions)
+    $agentConfig[$name] = [ordered]@{}
+    # Agents without a model keep the model selected in the current session.
+    if ($agent.model) {
+        $modelId = $agent.model
+        if (-not $models.Contains($modelId)) {
+            Write-Warning "Agent $name uses $modelId, which did not pass the ZDR check. It falls back to $DefaultModel."
+            $modelId = $DefaultModel
+        }
+        $agentConfig[$name].model = [ordered]@{ providerID = $ProviderId; model = $modelId }
     }
+    $agentConfig[$name].mode = $agent.mode
+    $agentConfig[$name].description = $agent.description
+    $agentConfig[$name].system = (Get-Content -LiteralPath (Join-Path $AgentRoot "$name.md") -Raw -Encoding utf8).Trim()
+    $agentConfig[$name].permissions = @($agent.permissions)
 }
 if (-not $searchReady) {
     $agentConfig.orchestrator.permissions = @($agentConfig.orchestrator.permissions | Where-Object { $_.resource -ne 'researcher' })
@@ -356,13 +454,24 @@ $config = [ordered]@{
             body     = [ordered]@{ provider = [ordered]@{ zdr = $true; data_collection = 'deny' } }
             models   = $models
         }
+        $SaleProviderId = [ordered]@{
+            name     = 'OpenRouter (ZDR, SALE)'
+            package  = '@opencode/ai/providers/openrouter'
+            env      = @('OPENROUTER_API_KEY')
+            settings = [ordered]@{ baseURL = 'https://openrouter.ai/api/v1' }
+            headers  = [ordered]@{ 'HTTP-Referer' = 'https://cubeone.de'; 'X-Title' = 'OpenCode cube one' }
+            body     = [ordered]@{ provider = [ordered]@{ zdr = $true; data_collection = 'deny' } }
+            models   = $saleModels
+        }
     }
     policies     = @(
         [ordered]@{ action = 'provider.use'; resource = '*'; effect = 'deny' }
         [ordered]@{ action = 'provider.use'; resource = $ProviderId; effect = 'allow' }
+        [ordered]@{ action = 'provider.use'; resource = $SaleProviderId; effect = 'allow' }
         [ordered]@{ action = 'integration.connect'; resource = '*'; effect = 'deny' }
         [ordered]@{ action = 'integration.use'; resource = '*'; effect = 'deny' }
         [ordered]@{ action = 'integration.use'; resource = $ProviderId; effect = 'allow' }
+        [ordered]@{ action = 'integration.use'; resource = $SaleProviderId; effect = 'allow' }
         # OpenCode registers every remote MCP server with OAuth as integration mcp_<sha1>.
         [ordered]@{ action = 'integration.use'; resource = 'mcp_*'; effect = 'allow' }
         # Registered by the cubeone-redmine plugin; plugin integrations need both actions, MCP ones only use.
@@ -439,7 +548,7 @@ $config = [ordered]@{
                 rulesOptional  = '~/.config/opencode/rules/optional'
                 disabledFile   = '~/.config/opencode/vorgaben-deaktiviert.json'
                 # Models a user config adds to this provider are disabled.
-                models         = [ordered]@{ $ProviderId = @($models.Keys) }
+                models         = [ordered]@{ $ProviderId = @($models.Keys); $SaleProviderId = @($saleModels.Keys) }
             }
         }
         [ordered]@{
@@ -459,6 +568,10 @@ $config = [ordered]@{
         }
         $ContextPruningPackage
         $MemoryPackage
+        # Rewrites the SALE allow-list from the live discount flag. The config hook runs before the model is built.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-sale'
+        }
         # Runs after DCP. Removes compact ids and the compression reminder from the text the chat shows.
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-dcp-view'
