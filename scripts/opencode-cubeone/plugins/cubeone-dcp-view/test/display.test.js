@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { createSseRewriter, stripDcpDisplay } from "../display.js"
+import { createDisplayFilter, createSseRewriter, rewriteJsonResponse, stripDcpDisplay } from "../display.js"
+import plugin from "../server.js"
 
 const GUIDANCE = [
   "Compressed block context:",
@@ -41,6 +42,91 @@ test("rejoins a reminder that arrives in several server-sent chunks", () => {
     if (text) content.push(text)
   }
   assert.equal(content.join(""), "Die Änderung liegt in server.js.")
+})
+
+test("removes compact tags at every possible streaming boundary", () => {
+  for (const tag of ["@1@", "@123@", "@b1@", "@b123@", "@blocked@"]) {
+    const text = `Vor ${tag} danach`
+    for (let split = 0; split <= text.length; split++) {
+      const filter = createDisplayFilter()
+      const result = filter.push(text.slice(0, split)) + filter.push(text.slice(split)) + filter.flush()
+      assert.equal(result, "Vor  danach", `${tag} split at ${split}`)
+    }
+    const filter = createDisplayFilter()
+    assert.equal([...text].map((character) => filter.push(character)).join("") + filter.flush(), "Vor  danach", `${tag} character stream`)
+  }
+})
+
+test("preserves ordinary @ text across chunk boundaries", () => {
+  const text = "Mail an a@example.de, @bob und @version."
+  const filter = createDisplayFilter()
+  assert.equal([...text].map((character) => filter.push(character)).join("") + filter.flush(), text)
+})
+
+test("filters plain JSON HTTP completions before they are stored", async () => {
+  const hooks = new Map()
+  await plugin.setup({ session: { hook: async (name, fn) => hooks.set(name, fn) }, event: { subscribe: async function* () {} } })
+  const payload = { choices: [{ message: { role: "assistant", content: "Erledigt @12@ und @b4@." }, finish_reason: "stop" }] }
+  const event = { response: new Response(JSON.stringify(payload), { headers: { "content-type": "application/json" } }) }
+  await hooks.get("http.response")(event)
+  const result = await event.response.json()
+  assert.equal(result.choices[0].message.content, "Erledigt  und .")
+})
+
+test("JSON completions keep independent choices, structured parts and tool arguments", () => {
+  const payload = { choices: [
+    { message: { content: "one @", tool_calls: [{ function: { arguments: "keep @1@" } }] } },
+    { message: { content: [{ type: "text", text: "two @b2@ @" }, { type: "image_url", image_url: { url: "https://example.test/@1@" } }] } },
+  ] }
+  const result = JSON.parse(rewriteJsonResponse(JSON.stringify(payload)))
+  assert.equal(result.choices[0].message.content, "one @")
+  assert.equal(result.choices[1].message.content[0].text, "two  @")
+  assert.deepEqual(result.choices[0].message.tool_calls, payload.choices[0].message.tool_calls)
+  assert.deepEqual(result.choices[1].message.content[1], payload.choices[1].message.content[1])
+})
+
+test("JSON Anthropic and Responses text is filtered without changing non-text parts", () => {
+  const anthropic = { content: [{ type: "text", text: "answer @123@" }, { type: "tool_use", input: { value: "@123@" } }] }
+  const result = JSON.parse(rewriteJsonResponse(JSON.stringify(anthropic)))
+  assert.equal(result.content[0].text, "answer ")
+  assert.deepEqual(result.content[1], anthropic.content[1])
+  const responses = { output: [{ type: "message", content: [{ type: "output_text", text: "answer @b12@" }] }, { type: "function_call", arguments: "@b12@" }] }
+  const output = JSON.parse(rewriteJsonResponse(JSON.stringify(responses)))
+  assert.equal(output.output[0].content[0].text, "answer ")
+  assert.deepEqual(output.output[1], responses.output[1])
+})
+
+test("filters compact tags split across WebSocket JSON frames", async () => {
+  const hooks = new Map()
+  await plugin.setup({ session: { hook: async (name, fn) => hooks.set(name, fn) }, event: { subscribe: async function* () {} } })
+  const chunks = ["Vor @b", "12", "@ danach @42@", "."]
+  let output = ""
+  for (const chunk of chunks) {
+    const event = { sessionID: "test-stream", frame: JSON.stringify({ choices: [{ delta: { content: chunk } }] }) }
+    hooks.get("experimental.ws.receive")(event)
+    output += JSON.parse(event.frame).choices[0].delta.content
+  }
+  const finish = { sessionID: "test-stream", frame: JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) }
+  hooks.get("experimental.ws.receive")(finish)
+  output += JSON.parse(finish.frame).choices[0].delta.content ?? ""
+  assert.equal(output, "Vor  danach .")
+})
+
+test("HTTP SSE filters byte-split events without changing tools or normal text", async () => {
+  const hooks = new Map()
+  await plugin.setup({ session: { hook: async (name, fn) => hooks.set(name, fn) }, event: { subscribe: async function* () {} } })
+  const payload = ['Grüße @', 'b12@ und @123@', ' an a@b.de.']
+    .map((content) => `data: ${JSON.stringify({ choices: [{ delta: { content, tool_calls: [{ function: { arguments: 'keep @1@' } }] } }] })}\n\n`).join('')
+    + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+  const bytes = new TextEncoder().encode(payload)
+  const stream = new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(new Uint8Array([byte])); controller.close() } })
+  const event = { response: new Response(stream, { headers: { 'content-type': 'text/event-stream' } }) }
+  await hooks.get('http.response')(event)
+  const output = await event.response.text()
+  const messages = output.split('\n').filter((line) => line.startsWith('data: {')).map((line) => JSON.parse(line.slice(6)))
+  assert.equal(messages.map((message) => message.choices[0].delta.content ?? '').join(''), 'Grüße  und  an a@b.de.')
+  assert.equal(messages[0].choices[0].delta.tool_calls[0].function.arguments, 'keep @1@')
+  assert.ok(output.includes('data: [DONE]'))
 })
 
 test("flushes a held placeholder when the model stops", () => {

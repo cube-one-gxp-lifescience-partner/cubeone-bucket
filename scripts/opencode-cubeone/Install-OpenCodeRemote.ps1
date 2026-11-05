@@ -6,7 +6,9 @@
     The desktop app runs a separate OpenCode server for WSL and for each SSH host. That server
     reads /etc/opencode on Linux, not C:\ProgramData\opencode. This script copies the managed
     models, rules and plugins there and stores the OpenRouter key in the remote user's
-    ~/.config/opencode/openrouter.key (mode 0600). The key is never printed.
+    ~/.config/opencode/openrouter.key (mode 0600). The key is never printed. Package and key travel through
+    a private, randomly named 0700 directory under /tmp that is removed again on success, on failure and on abort;
+    the key file is replaced atomically and never written to a fixed or world-readable path.
 #>
 [CmdletBinding()]
 param(
@@ -222,13 +224,185 @@ function Invoke-Checked {
     }
 }
 
-$installSh = @'
+# cmd.exe's own "<" redirection reads this; it is the empty input for steps that need no stdin.
+$nullInput = 'NUL'
+$stageDirPattern = '^/tmp/cubeone-[A-Za-z0-9]{10}$'
+# The only remote commands that travel inside one pair of double quotes through cmd.exe, ssh and
+# wsl.exe: receive a file into the private stage directory, or remove that directory.
+$stageCommandPattern = '^(cat > |rm -rf )/tmp/cubeone-[A-Za-z0-9]{10}(/[A-Za-z0-9][A-Za-z0-9.-]*)?$'
+$scriptArgPattern = '^[A-Za-z0-9_./-]+$'
+
+function New-RemoteTarget {
+    param([string]$Kind, [string]$Name, [string]$SshArguments, [string]$UserProfile)
+    if ($Kind -ne 'wsl' -and $Kind -ne 'ssh') { throw "Unknown remote target kind '$Kind'." }
+    return [pscustomobject]@{ Kind = $Kind; Name = $Name; SshArguments = $SshArguments; UserProfile = $UserProfile }
+}
+
+function Invoke-RemoteCommand {
+    param($Target, [string]$Command, [string]$InputPath)
+    if ($Command -notmatch $stageCommandPattern) { throw 'Remote command is not an allowed staging command.' }
+    if ($Target.Kind -eq 'wsl') {
+        $arguments = "-d $($Target.Name) -- bash -c `"$Command`""
+        return Send-File -Exe 'wsl.exe' -Arguments $arguments -InputPath $InputPath
+    }
+    $arguments = "$($Target.SshArguments) `"$Command`""
+    return Send-File -Exe 'ssh.exe' -Arguments $arguments -InputPath $InputPath -UserProfile $Target.UserProfile
+}
+
+function Invoke-RemoteScript {
+    param($Target, [string]$InputPath, [string[]]$ScriptArguments = @(), [switch]$AsRoot)
+    foreach ($item in $ScriptArguments) {
+        if ($item -notmatch $scriptArgPattern) { throw 'Remote script argument contains unsafe characters.' }
+    }
+    $tail = ''
+    if ($ScriptArguments.Count -gt 0) { $tail = ' -- ' + ($ScriptArguments -join ' ') }
+    if ($Target.Kind -eq 'wsl') {
+        $user = ''
+        if ($AsRoot) { $user = '-u root ' }
+        $arguments = "-d $($Target.Name) $user-- bash -s$tail"
+        return Send-File -Exe 'wsl.exe' -Arguments $arguments -InputPath $InputPath
+    }
+    $arguments = "$($Target.SshArguments) bash -s$tail"
+    return Send-File -Exe 'ssh.exe' -Arguments $arguments -InputPath $InputPath -UserProfile $Target.UserProfile
+}
+
+function New-RemoteStage {
+    param($Target, [string]$StageScriptPath)
+    $result = Invoke-RemoteScript -Target $Target -InputPath $StageScriptPath
+    Invoke-Checked $result "Private staging directory on $($Target.Kind) $($Target.Name)"
+    $lines = @($result.Out -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $path = ''
+    if ($lines.Count -gt 0) { $path = $lines[$lines.Count - 1] }
+    if ($path -notmatch $stageDirPattern) {
+        throw "Private staging directory on $($Target.Kind) $($Target.Name) returned an unexpected path."
+    }
+    return $path
+}
+
+function Send-RemoteStageFile {
+    param($Target, [string]$StageDir, [string]$Name, [string]$InputPath)
+    $result = Invoke-RemoteCommand -Target $Target -Command "cat > $StageDir/$Name" -InputPath $InputPath
+    Invoke-Checked $result "Copy $Name to $($Target.Kind) $($Target.Name)"
+}
+
+function Invoke-StagedScript {
+    <#
+    Stages the files in a private directory on the target, runs the script with that directory as its
+    argument (after LeadingArguments, before TrailingArguments) and always removes the directory again,
+    whether the transfer, the script or the connection failed. Returns the script result.
+    #>
+    param(
+        $Target,
+        [string]$StageScriptPath,
+        $Files,
+        [string]$ScriptPath,
+        [string[]]$LeadingArguments = @(),
+        [string[]]$TrailingArguments = @(),
+        [switch]$AsRoot
+    )
+    $stageDir = $null
+    try {
+        $stageDir = New-RemoteStage -Target $Target -StageScriptPath $StageScriptPath
+        foreach ($name in $Files.Keys) {
+            Send-RemoteStageFile -Target $Target -StageDir $stageDir -Name $name -InputPath $Files[$name]
+        }
+        $scriptArguments = @($LeadingArguments) + @($stageDir) + @($TrailingArguments)
+        return Invoke-RemoteScript -Target $Target -InputPath $ScriptPath -ScriptArguments $scriptArguments -AsRoot:$AsRoot
+    } finally {
+        Remove-RemoteStage -Target $Target -StageDir $stageDir
+    }
+}
+
+function Remove-RemoteStage {
+    # Best effort and idempotent: the install scripts already remove the directory on success.
+    param($Target, [string]$StageDir)
+    if (-not $StageDir -or $StageDir -notmatch $stageDirPattern) { return }
+    try {
+        $result = Invoke-RemoteCommand -Target $Target -Command "rm -rf $StageDir" -InputPath $nullInput
+        if ($result.Code -ne 0) {
+            Write-Warning "Staging directory $StageDir on $($Target.Kind) $($Target.Name) was not removed."
+        }
+    } catch {
+        $err = $_
+        Write-Warning "Staging directory $StageDir on $($Target.Kind) $($Target.Name) was not removed: $($err.Exception.Message)"
+    }
+}
+
+# Remote side of the transfer. Package and key never land at a fixed path in /tmp. A stage step creates
+# a private directory (mktemp -d, mode 0700, random name) and every later step reads from it. The
+# directory is removed by the install script itself and again by the caller, also after a failure.
+$stageSh = @'
 #!/bin/bash
 set -eu
+umask 077
+inbox=$(mktemp -d /tmp/cubeone-XXXXXXXXXX)
+chmod 700 "$inbox"
+printf '%s\n' "$inbox"
+'@
+
+# Shared by the install and key scripts. check_inbox accepts only a directory the stage step made:
+# fixed prefix, 10 alphanumerics, no symlink, owned by the caller (or by root / the target user when
+# the caller is root). put_key replaces the key in one rename from a 0600 file in the same directory,
+# so a reader never sees a partial key, an existing symlink is replaced instead of followed, and a
+# failure leaves the old key untouched.
+$commonSh = @'
+#!/bin/bash
+set -eu
+check_inbox() {
+    case "$1" in /tmp/cubeone-*) ;; *) return 1 ;; esac
+    suffix=${1#/tmp/cubeone-}
+    case "$suffix" in ''|*[!A-Za-z0-9]*) return 1 ;; esac
+    [ "${#suffix}" -eq 10 ] || return 1
+    if [ -L "$1" ] || [ ! -d "$1" ]; then return 1; fi
+    if [ "$(id -u)" -eq 0 ]; then
+        owner=$(stat -c %u "$1")
+        allowed=0
+        if [ -n "${2:-}" ]; then allowed=$(id -u "$2"); fi
+        if [ "$owner" != "0" ] && [ "$owner" != "$allowed" ]; then return 1; fi
+    elif [ ! -O "$1" ]; then
+        return 1
+    fi
+    chmod 700 "$1"
+}
+put_key() {
+    if [ -d "$2" ]; then echo "key target is a directory" >&2; return 1; fi
+    tmp=$(umask 077 && mktemp "$(dirname "$2")/.openrouter.key.XXXXXX") || return 1
+    if cat "$1" > "$tmp" && chmod 600 "$tmp" && { [ -z "${3:-}" ] || chown "$3:$3" "$tmp"; } && mv -f "$tmp" "$2"; then
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+byte_count() {
+    wc -c < "$1" | tr -d ' '
+}
+'@
+
+$installBodySh = @'
 TARGET_USER="${1:-}"
+if [ "$TARGET_USER" = "-" ]; then TARGET_USER=""; fi
+INBOX="${2:-}"
+KEY_BYTES="${3:-}"
+TGZ_BYTES="${4:-}"
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE" /tmp/cubeone-opencode.tgz /tmp/cubeone-openrouter.key' EXIT
-tar -xzf /tmp/cubeone-opencode.tgz -C "$STAGE"
+trap 'rm -rf "$STAGE"' EXIT
+trap 'exit 1' INT TERM HUP
+if ! check_inbox "$INBOX" "$TARGET_USER"; then
+    echo "invalid or foreign staging directory" >&2
+    exit 1
+fi
+trap 'rm -rf "$STAGE" "$INBOX"' EXIT
+chmod 600 "$INBOX"/* 2>/dev/null || true
+if [ ! -f "$INBOX/cubeone-opencode.tgz" ] || [ "$(byte_count "$INBOX/cubeone-opencode.tgz")" != "$TGZ_BYTES" ]; then
+    echo "package transfer incomplete" >&2
+    exit 1
+fi
+case "$KEY_BYTES" in ''|*[!0-9]*) echo "invalid expected key size" >&2; exit 1 ;; esac
+if [ "$KEY_BYTES" -gt 0 ] && { [ ! -f "$INBOX/openrouter.key" ] || [ -L "$INBOX/openrouter.key" ] || [ "$(byte_count "$INBOX/openrouter.key")" != "$KEY_BYTES" ]; }; then
+    echo "key transfer incomplete" >&2
+    exit 1
+fi
+tar -xzf "$INBOX/cubeone-opencode.tgz" -C "$STAGE"
 if [ -n "$TARGET_USER" ] && [ "$(id -u)" -eq 0 ]; then
     HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 else
@@ -243,8 +417,8 @@ elif mkdir -p "$ROOT" 2>/dev/null && [ -w "$ROOT" ]; then
 elif command -v sudo >/dev/null 2>&1 && sudo -n mkdir -p "$ROOT"; then
     SUDO="sudo -n"
 else
-    ROOT="$HOME_DIR/.config/opencode"
-    mkdir -p "$ROOT"
+    echo "cannot write managed configuration to /etc/opencode; personal configuration was not changed" >&2
+    exit 1
 fi
 copy_tree() {
     if [ -n "$SUDO" ]; then
@@ -277,38 +451,151 @@ if [ -n "$SUDO" ]; then
 else
     sed "s#__CUBEONE_ROOT__#${ROOT}#g" "$STAGE/opencode.jsonc" > "$ROOT/opencode.jsonc"
 fi
-mkdir -p "$HOME_DIR/.config/opencode/vorgaben" "$HOME_DIR/.config/opencode/rules/optional"
+personal_owner() {
+    if [ -n "$TARGET_USER" ] && [ "$(id -u)" -eq 0 ]; then chown "$TARGET_USER:$TARGET_USER" "$1"; fi
+}
+for directory in "$HOME_DIR/.config" "$HOME_DIR/.config/opencode" "$HOME_DIR/.config/opencode/vorgaben" "$HOME_DIR/.config/opencode/rules" "$HOME_DIR/.config/opencode/rules/optional"; do
+    if [ ! -d "$directory" ]; then mkdir -p "$directory"; personal_owner "$directory"; fi
+done
 if [ -d "$STAGE/user/rules/optional" ]; then
-    cp -f "$STAGE/user/rules/optional/"*.md "$HOME_DIR/.config/opencode/rules/optional/"
-    prune_md "$STAGE/user/rules/optional" "$HOME_DIR/.config/opencode/rules/optional"
+    for optional in "$STAGE/user/rules/optional/"*.md; do
+        [ -f "$optional" ] || continue
+        destination="$HOME_DIR/.config/opencode/rules/optional/$(basename "$optional")"
+        if [ ! -e "$destination" ] && [ ! -L "$destination" ]; then cp "$optional" "$destination"; personal_owner "$destination"; fi
+    done
 fi
-# Design is an always-on optional rule now. The old copy was file-scoped and would still apply on its own.
-rm -f "$HOME_DIR/.config/opencode/vorgaben/design.md"
-# A previous run without root stored the managed file in the user config and hid the MCP servers.
-if [ -f "$HOME_DIR/.config/opencode/opencode.jsonc" ] && grep -q 'openrouter-zdr' "$HOME_DIR/.config/opencode/opencode.jsonc" && ! grep -q '"mcp"' "$HOME_DIR/.config/opencode/opencode.jsonc"; then
-    mv "$HOME_DIR/.config/opencode/opencode.jsonc" "$HOME_DIR/.config/opencode/opencode.jsonc.bak-cubeone"
-fi
-if [ ! -f "$HOME_DIR/.config/opencode/opencode.jsonc" ] && [ -f "$STAGE/user/opencode.jsonc" ]; then
+# Existing personal rules and configuration are never replaced or removed.
+if [ ! -e "$HOME_DIR/.config/opencode/opencode.jsonc" ] && [ ! -L "$HOME_DIR/.config/opencode/opencode.jsonc" ] && [ ! -e "$HOME_DIR/.config/opencode/opencode.json" ] && [ ! -L "$HOME_DIR/.config/opencode/opencode.json" ] && [ -f "$STAGE/user/opencode.jsonc" ]; then
     cp "$STAGE/user/opencode.jsonc" "$HOME_DIR/.config/opencode/opencode.jsonc"
+    personal_owner "$HOME_DIR/.config/opencode/opencode.jsonc"
 fi
-if [ ! -f "$HOME_DIR/.config/opencode/vorgaben/design.md" ] && [ -f "$STAGE/user/vorgaben/design.md" ]; then
-    cp "$STAGE/user/vorgaben/design.md" "$HOME_DIR/.config/opencode/vorgaben/design.md"
-fi
-if [ ! -f "$HOME_DIR/.config/opencode/opencode-mem.jsonc" ] && [ -f "$STAGE/user/opencode-mem.jsonc" ]; then
-    cp "$STAGE/user/opencode-mem.jsonc" "$HOME_DIR/.config/opencode/opencode-mem.jsonc"
-fi
-if [ -s /tmp/cubeone-openrouter.key ]; then
-    install -m 600 -o "$TARGET_USER" -g "$TARGET_USER" /dev/null "$HOME_DIR/.config/opencode/openrouter.key" 2>/dev/null || true
-    umask 077
-    cat /tmp/cubeone-openrouter.key > "$HOME_DIR/.config/opencode/openrouter.key"
-    chmod 600 "$HOME_DIR/.config/opencode/openrouter.key"
-    if [ -n "$TARGET_USER" ] && [ "$(id -u)" -eq 0 ]; then
-        chown "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/opencode/openrouter.key"
-        chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/opencode"
+# Merge only missing MCP names. Python is optional: without it, preserve the existing file and warn.
+USER_CONFIG="$HOME_DIR/.config/opencode/opencode.jsonc"
+if [ ! -f "$USER_CONFIG" ]; then USER_CONFIG="$HOME_DIR/.config/opencode/opencode.json"; fi
+if [ -f "$USER_CONFIG" ] && [ -f "$STAGE/user/opencode.jsonc" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$USER_CONFIG" "$STAGE/user/opencode.jsonc" <<'PY' || echo "warning: personal MCP configuration was not merged" >&2
+import json
+import os
+import sys
+
+def parse_jsonc(path):
+    with open(path, encoding="utf-8-sig") as source:
+        text = source.read()
+    clean = []
+    i = 0
+    quoted = False
+    while i < len(text):
+        char = text[i]
+        if quoted:
+            clean.append(char)
+            if char == "\\" and i + 1 < len(text):
+                clean.append(text[i + 1])
+                i += 2
+                continue
+            if char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+            clean.append(char)
+        elif text.startswith("//", i):
+            end = text.find("\n", i + 2)
+            i = len(text) if end < 0 else end
+            continue
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            if end < 0:
+                raise ValueError("unterminated comment")
+            clean.append(" ")
+            i = end + 2
+            continue
+        else:
+            clean.append(char)
+        i += 1
+    text = "".join(clean)
+    clean = []
+    i = 0
+    quoted = False
+    while i < len(text):
+        char = text[i]
+        if quoted:
+            clean.append(char)
+            if char == "\\" and i + 1 < len(text):
+                clean.append(text[i + 1])
+                i += 2
+                continue
+            if char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+            clean.append(char)
+        elif char == ",":
+            end = i + 1
+            while end < len(text) and text[end].isspace():
+                end += 1
+            if end >= len(text) or text[end] not in "}]":
+                clean.append(char)
+        else:
+            clean.append(char)
+        i += 1
+    return json.loads("".join(clean))
+
+try:
+    destination, template = sys.argv[1:]
+    current = parse_jsonc(destination)
+    supplied = parse_jsonc(template)
+    if not isinstance(current, dict) or not isinstance(supplied, dict):
+        raise ValueError("configuration is not an object")
+    mcp = current.setdefault("mcp", {})
+    if not isinstance(mcp, dict):
+        raise ValueError("MCP configuration is not an object")
+    servers = mcp.setdefault("servers", {})
+    wanted = supplied.get("mcp", {}).get("servers", {})
+    if not isinstance(servers, dict) or not isinstance(wanted, dict):
+        raise ValueError("server configuration is not an object")
+    added = [name for name in wanted if name not in servers]
+    if added:
+        for name in added:
+            servers[name] = wanted[name]
+        rendered = json.dumps(current, ensure_ascii=False, indent=2) + "\n"
+        backup = destination + ".bak-cubeone-mcp-" + os.urandom(8).hex()
+        # Exclusive backup creation prevents overwriting or following a planted backup link.
+        descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as saved:
+            original_stat = os.stat(destination)
+            if hasattr(os, "fchown") and os.geteuid() == 0:
+                os.fchown(saved.fileno(), original_stat.st_uid, original_stat.st_gid)
+            with open(destination, "rb") as source:
+                saved.write(source.read())
+        with open(destination, "r+", encoding="utf-8") as target:
+            target.seek(0)
+            target.write(rendered)
+            target.truncate()
+        print("personal MCP configuration: missing servers added")
+except Exception:
+    print("warning: personal MCP configuration could not be merged; check its backup if writing failed", file=sys.stderr)
+    sys.exit(1)
+PY
+    else
+        echo "warning: python3 unavailable; existing personal MCP configuration preserved" >&2
     fi
+fi
+if [ ! -e "$HOME_DIR/.config/opencode/vorgaben/design.md" ] && [ ! -L "$HOME_DIR/.config/opencode/vorgaben/design.md" ] && [ -f "$STAGE/user/vorgaben/design.md" ]; then
+    cp "$STAGE/user/vorgaben/design.md" "$HOME_DIR/.config/opencode/vorgaben/design.md"
+    personal_owner "$HOME_DIR/.config/opencode/vorgaben/design.md"
+fi
+if [ ! -e "$HOME_DIR/.config/opencode/opencode-mem.jsonc" ] && [ ! -L "$HOME_DIR/.config/opencode/opencode-mem.jsonc" ] && [ -f "$STAGE/user/opencode-mem.jsonc" ]; then
+    cp "$STAGE/user/opencode-mem.jsonc" "$HOME_DIR/.config/opencode/opencode-mem.jsonc"
+    personal_owner "$HOME_DIR/.config/opencode/opencode-mem.jsonc"
+fi
+if [ "$KEY_BYTES" -gt 0 ]; then
+    KEY_OWNER=""
+    if [ -n "$TARGET_USER" ] && [ "$(id -u)" -eq 0 ]; then KEY_OWNER="$TARGET_USER"; fi
+    put_key "$INBOX/openrouter.key" "$HOME_DIR/.config/opencode/openrouter.key" "$KEY_OWNER"
 fi
 printf 'installed %s\n' "$ROOT"
 '@
+$installSh = $commonSh + "`n" + $installBodySh
 
 # Installs the official OpenCode CLI (the same binary the desktop app runs as its remote server) when
 # a Linux target does not have it yet, so a freshly added SSH host needs no manual setup. Uses the
@@ -412,19 +699,29 @@ function Update-OpenRouterKeyOnTargets {
     $linuxScript = Join-Path $work 'install-key.sh'
     [System.IO.File]::WriteAllText($keyFile, $key, $utf8)
     $linuxSh = @'
-#!/bin/bash
-set -eu
-trap 'rm -f /tmp/cubeone-openrouter.key' EXIT
-if [ ! -s /tmp/cubeone-openrouter.key ]; then
+INBOX="${1:-}"
+KEY_BYTES="${2:-}"
+trap 'exit 1' INT TERM HUP
+if ! check_inbox "$INBOX" ""; then
+  echo "invalid or foreign staging directory" >&2
+  exit 1
+fi
+trap 'rm -rf "$INBOX"' EXIT
+if [ ! -s "$INBOX/openrouter.key" ]; then
   echo "key file missing" >&2
+  exit 1
+fi
+if [ "$(byte_count "$INBOX/openrouter.key")" != "$KEY_BYTES" ]; then
+  echo "key transfer incomplete" >&2
   exit 1
 fi
 umask 077
 mkdir -p "$HOME/.config/opencode"
-cat /tmp/cubeone-openrouter.key > "$HOME/.config/opencode/openrouter.key"
-chmod 600 "$HOME/.config/opencode/openrouter.key"
+put_key "$INBOX/openrouter.key" "$HOME/.config/opencode/openrouter.key"
 if [ -d "$HOME/.local/config/opencode-people" ]; then
-  find "$HOME/.local/config/opencode-people" -type f -path '*/opencode/openrouter.key' -exec cp "$HOME/.config/opencode/openrouter.key" {} \; -exec chmod 600 {} \;
+  find "$HOME/.local/config/opencode-people" -type f -path '*/opencode/openrouter.key' -print0 | while IFS= read -r -d '' person_key; do
+    put_key "$INBOX/openrouter.key" "$person_key" || exit 1
+  done
 fi
 referenced=no
 for candidate in "$HOME/.config/opencode/opencode.jsonc" /etc/opencode/opencode.jsonc; do
@@ -435,7 +732,10 @@ done
 bytes=$(wc -c < "$HOME/.config/opencode/openrouter.key")
 printf 'bytes=%s referenced=%s\n' "$bytes" "$referenced"
 '@
+    $linuxSh = $commonSh + "`n" + $linuxSh
     [System.IO.File]::WriteAllText($linuxScript, ($linuxSh -replace "`r`n", "`n"), $utf8)
+    $stageScript = Join-Path $work 'stage.sh'
+    [System.IO.File]::WriteAllText($stageScript, ($stageSh -replace "`r`n", "`n"), $utf8)
     $windowsSh = @'
 $k = [Console]::In.ReadToEnd().Trim()
 if (-not $k -or $k.Contains("`n") -or $k.Contains("`r")) { throw 'key missing' }
@@ -455,13 +755,15 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
 '@
     $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($windowsSh))
     $expected = $key.Length
+    $keyBytes = $utf8.GetByteCount($key)
+    $keyFiles = [ordered]@{ 'openrouter.key' = $keyFile }
     try {
         if (-not $SkipWsl -and -not $OnlyHost) {
             foreach ($distro in @(Get-WslDistros)) {
+                $target = New-RemoteTarget -Kind 'wsl' -Name $distro
                 try {
-                    $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -c `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile
-                    Invoke-Checked $recv "Key file to WSL $distro"
-                    $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -s" -InputPath $linuxScript
+                    $recv = Invoke-StagedScript -Target $target -StageScriptPath $stageScript -Files $keyFiles `
+                        -ScriptPath $linuxScript -TrailingArguments @($keyBytes)
                     Invoke-Checked $recv "Key on WSL $distro"
                     Write-Host "WSL ${distro}: $($recv.Out.Trim())" -ForegroundColor Green
                 } catch {
@@ -475,16 +777,17 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
         if ($OnlyHost) { $sshTargets = @($sshTargets | Where-Object { $_ -eq $OnlyHost }) }
         foreach ($sshHost in $sshTargets) {
             $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
+            $target = New-RemoteTarget -Kind 'ssh' -Name $sshHost -SshArguments $sshArgs -UserProfile $ProfilePath
             try {
-                $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $keyFile -UserProfile $ProfilePath
+                # The probe reads no stdin, so it gets none: the key is not sent to a host before it is known to be Linux.
+                $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $nullInput -UserProfile $ProfilePath
                 if ($probe.Code -eq 0 -and $probe.Out.Trim() -eq 'Linux') {
-                    $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile -UserProfile $ProfilePath
-                    Invoke-Checked $recv "Key file to SSH $sshHost"
-                    $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $linuxScript -UserProfile $ProfilePath
+                    $recv = Invoke-StagedScript -Target $target -StageScriptPath $stageScript -Files $keyFiles `
+                        -ScriptPath $linuxScript -TrailingArguments @($keyBytes)
                     Invoke-Checked $recv "Key on SSH $sshHost"
                     $line = $recv.Out.Trim()
-                    if ($line -notmatch "bytes=$expected(\s|$)") {
-                        Write-Warning "SSH ${sshHost}: $line (expected $expected bytes)"
+                    if ($line -notmatch "bytes=$keyBytes(\s|$)") {
+                        Write-Warning "SSH ${sshHost}: $line (expected $keyBytes bytes)"
                     } else {
                         Write-Host "SSH ${sshHost}: $line" -ForegroundColor Green
                     }
@@ -515,6 +818,7 @@ $keyFile = Join-Path $work 'openrouter.key'
 $scriptFile = Join-Path $work 'install.sh'
 $cliInstallFile = Join-Path $work 'install-cli.sh'
 $personFile = Join-Path $work 'install-person.sh'
+$stageFile = Join-Path $work 'stage.sh'
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 try {
     if ($KeyOnly) {
@@ -533,6 +837,7 @@ try {
     [System.IO.File]::WriteAllText($scriptFile, $scriptText, $utf8)
     [System.IO.File]::WriteAllText($cliInstallFile, ($cliInstallSh -replace "`r`n", "`n"), $utf8)
     [System.IO.File]::WriteAllText($personFile, ($personSh -replace "`r`n", "`n"), $utf8)
+    [System.IO.File]::WriteAllText($stageFile, ($stageSh -replace "`r`n", "`n"), $utf8)
     if (Test-Path -LiteralPath $tar) { Remove-Item -LiteralPath $tar -Force }
     & tar.exe -czf $tar -C $payload .
     if ($LASTEXITCODE -ne 0) { throw "tar failed with exit $LASTEXITCODE" }
@@ -544,19 +849,23 @@ try {
         Write-Warning 'HKLM\SOFTWARE\cubeone\OpenCode OpenRouterApiKey is not set. Remote servers get the models, but calls fail until the key file exists.'
         [System.IO.File]::WriteAllText($keyFile, '', $utf8)
     }
+    $keyBytes = $utf8.GetByteCount([string]$key)
+    $tgzBytes = (Get-Item -LiteralPath $tar).Length
+    # The package is always sent; the key only when one is deposited, so an empty key never replaces a good one.
+    $installFiles = [ordered]@{ 'cubeone-opencode.tgz' = $tar }
+    if ($key) { $installFiles['openrouter.key'] = $keyFile }
 
     $ok = 0
     if (-not $SkipWsl -and -not $OnlyHost) {
     foreach ($distro in @(Get-WslDistros)) {
+        $target = New-RemoteTarget -Kind 'wsl' -Name $distro
         try {
             # -u root reaches /etc/opencode without a sudo password. The key stays in the distro user's home.
             $wslUser = (& wsl.exe -d $distro -- bash -lc 'printf %s "$USER"').Trim()
             if (-not $wslUser) { throw 'could not resolve the WSL user' }
-            $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -c `"cat > /tmp/cubeone-opencode.tgz`"" -InputPath $tar
-            Invoke-Checked $recv "Copy to WSL $distro"
-            $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -- bash -c `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile
-            Invoke-Checked $recv "Key file to WSL $distro"
-            $recv = Send-File -Exe 'wsl.exe' -Arguments "-d $distro -u root -- bash -s -- $wslUser" -InputPath $scriptFile
+            # Package and key go into a private 0700 directory of the distro user, never to a fixed /tmp path.
+            $recv = Invoke-StagedScript -Target $target -StageScriptPath $stageFile -Files $installFiles `
+                -ScriptPath $scriptFile -LeadingArguments @($wslUser) -TrailingArguments @($keyBytes, $tgzBytes) -AsRoot
             Invoke-Checked $recv "Install on WSL $distro"
             Write-Host "WSL ${distro}: $($recv.Out.Trim())" -ForegroundColor Green
             $ok++
@@ -583,9 +892,10 @@ try {
     if ($OnlyHost) { $sshTargets = @($sshTargets | Where-Object { $_ -eq $OnlyHost }) }
     foreach ($sshHost in $sshTargets) {
         $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
+        $target = New-RemoteTarget -Kind 'ssh' -Name $sshHost -SshArguments $sshArgs -UserProfile $ProfilePath
         try {
-            $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $keyFile -UserProfile $ProfilePath
-            # uname reads no stdin; an empty key file keeps the stream valid.
+            # uname reads no stdin, so the probe gets none: the key never goes to a host that is not known to be Linux.
+            $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $nullInput -UserProfile $ProfilePath
             if ($probe.Code -ne 0 -or $probe.Out.Trim() -ne 'Linux') {
                 Write-Warning "SSH ${sshHost}: skipped, not a reachable Linux host."
                 continue
@@ -598,13 +908,10 @@ try {
             $person = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $personFile -UserProfile $ProfilePath
             Invoke-Checked $person "per-person OpenCode data directory on SSH $sshHost"
             Write-Host "SSH ${sshHost}: $($person.Out.Trim())" -ForegroundColor Green
-            # Quoted so cmd.exe (Send-File's local redirection shell) leaves the ">" for the remote
-            # shell instead of redirecting ssh's own stdout into a local file named /tmp/... .
-            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-opencode.tgz`"" -InputPath $tar -UserProfile $ProfilePath
-            Invoke-Checked $recv "Copy to SSH $sshHost"
-            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs `"cat > /tmp/cubeone-openrouter.key`"" -InputPath $keyFile -UserProfile $ProfilePath
-            Invoke-Checked $recv "Key file to SSH $sshHost"
-            $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs bash -s" -InputPath $scriptFile -UserProfile $ProfilePath
+            # Send-RemoteStageFile quotes the remote command so cmd.exe (Send-File's local redirection shell)
+            # leaves the ">" for the remote shell instead of redirecting ssh's own stdout into a local file.
+            $recv = Invoke-StagedScript -Target $target -StageScriptPath $stageFile -Files $installFiles `
+                -ScriptPath $scriptFile -LeadingArguments @('-') -TrailingArguments @($keyBytes, $tgzBytes)
             Invoke-Checked $recv "Install on SSH $sshHost"
             Write-Host "SSH ${sshHost}: $($recv.Out.Trim())" -ForegroundColor Green
         } catch {

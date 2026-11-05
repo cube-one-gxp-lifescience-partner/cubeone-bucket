@@ -1,4 +1,4 @@
-import { createSseRewriter } from "./display.js"
+import { createSseRewriter, rewriteJsonResponse } from "./display.js"
 
 function textResponse(response) {
   const type = response.headers?.get?.("content-type") ?? ""
@@ -7,6 +7,16 @@ function textResponse(response) {
 
 async function filterHttp(response) {
   if (!response?.body || !textResponse(response)) return response
+  const type = response.headers?.get?.("content-type") ?? ""
+  if (/\bapplication\/(?:[\w.+-]*\+)?json\b/i.test(type)) {
+    const original = await response.clone().text()
+    const rewritten = rewriteJsonResponse(original)
+    if (rewritten === original) return response
+    const headers = new Headers(response.headers)
+    headers.delete("content-length")
+    headers.delete("content-encoding")
+    return new Response(rewritten, { status: response.status, statusText: response.statusText, headers })
+  }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
@@ -14,18 +24,27 @@ async function filterHttp(response) {
   const stream = new ReadableStream({
     async pull(controller) {
       try {
-        const { done, value } = await reader.read()
-        if (done) {
-          const tail = rewriter.push(decoder.decode()) + rewriter.flush()
-          if (tail) controller.enqueue(encoder.encode(tail))
-          controller.close()
-          return
+        // Keep reading while an incomplete SSE line produces no output, otherwise a pending consumer stalls.
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            const tail = rewriter.push(decoder.decode()) + rewriter.flush()
+            if (tail) controller.enqueue(encoder.encode(tail))
+            controller.close()
+            return
+          }
+          const next = rewriter.push(decoder.decode(value, { stream: true }))
+          if (next) {
+            controller.enqueue(encoder.encode(next))
+            return
+          }
         }
-        const next = rewriter.push(decoder.decode(value, { stream: true }))
-        if (next) controller.enqueue(encoder.encode(next))
       } catch (error) {
         controller.error(error)
       }
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
     },
   })
   const headers = new Headers(response.headers)

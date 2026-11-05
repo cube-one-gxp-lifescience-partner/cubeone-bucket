@@ -8,6 +8,6 @@
     "./server": "./server.js"
   },
   "scripts": {
-    "test": "node --test test/sale.test.js"
+    "test": "node --test test/"
   }
 }

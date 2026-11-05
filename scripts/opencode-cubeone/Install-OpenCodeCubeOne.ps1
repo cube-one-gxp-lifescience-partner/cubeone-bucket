@@ -4,14 +4,16 @@
 
 .DESCRIPTION
     Machine part (%ProgramData%\opencode): the managed opencode.jsonc, the mandatory rules, the
-    path rules (vorgaben) and the cube one plugins. OpenCode ranks this directory above user and project configuration. The
-    directory is left writable only for SYSTEM and Administrators.
+    path rules (vorgaben) and the cube one plugins. OpenCode ranks this directory above user and project configuration.
+    A directory created by this run is locked: writable only for SYSTEM and Administrators. An existing
+    directory keeps its ACL and every write permission it already has, also when it is already current.
 
     User part (~\.config\opencode): MCP servers in opencode.jsonc and the optional rules. Existing
     files are kept; missing MCP servers and missing optional rules are added.
 
     Works as SYSTEM (auto-updater), as an elevated administrator and as a standard user. A standard
-    user can create the machine directory once, but cannot change it afterwards.
+    user can create the machine directory once; updating an existing one works only where its
+    permissions already allow it.
 #>
 [CmdletBinding()]
 param(
@@ -149,6 +151,8 @@ function Protect-ManagedDirectory {
         [Parameter(Mandatory = $true)][bool]$Elevated
     )
 
+    # Only for a directory this run has just created (see Install-ManagedConfiguration). It replaces the
+    # inherited ACL, so it must never be called for an existing installation.
     # Principals are addressed by SID: localized group names and non-ASCII
     # account names do not survive the native-command argument encoding.
     $grants = @("*${SidSystem}:(OI)(CI)(F)", "*${SidAdministrators}:(OI)(CI)(F)", "*${SidUsers}:(OI)(CI)(RX)")
@@ -239,37 +243,56 @@ function Install-ManagedConfiguration {
 
     $elevated = Test-IsElevated
     if (Test-TreeEqual -Source $Staging -Target $Target) {
+        # Nothing to write and nothing to touch: permissions of an existing installation stay as they are.
         Write-Host "Managed OpenCode configuration in $Target is current." -ForegroundColor Cyan
-        if ($elevated) {
-            Protect-ManagedDirectory -Path $Target -Elevated $true
-        }
         return
     }
 
-    if (Test-Path -LiteralPath $Target) {
-        if ($elevated) {
-            Invoke-TakeownAdministrators -Path $Target
-            Invoke-Icacls @($Target, '/grant', "*${SidAdministrators}:(OI)(CI)(F)", '/T', '/C', '/Q')
-        } elseif (-not (Test-CanWrite -Path $Target)) {
-            Write-Warning "The managed OpenCode configuration in $Target is outdated and locked. Run 'scoop update opencode-desktop --force' as administrator, or let the auto-updater apply it."
-            return
-        }
-    } else {
+    # Only a directory that did not exist and that this run created empty counts as a new installation. Its
+    # ACL is set once at the end. Anything that existed before keeps its ACL and its write permissions.
+    $fresh = -not (Test-Path -LiteralPath $Target)
+    if ($fresh) {
         New-Item -ItemType Directory -Path $Target -Force | Out-Null
+        if (@(Get-ChildItem -LiteralPath $Target -Force).Count -gt 0) {
+            # Somebody else created and filled it between the check and New-Item: treat it as existing.
+            $fresh = $false
+        }
+    }
+    if ($fresh) {
+        # Nothing to prepare.
+    } elseif ($elevated) {
+        # Emergency access for an administrator who cannot write yet. Add an entry first; take ownership
+        # only when that is refused. Nothing is removed in either step.
+        if (-not (Test-CanWrite -Path $Target)) {
+            $adminGrant = @($Target, '/grant', "*${SidAdministrators}:(OI)(CI)(F)", '/T', '/C', '/Q')
+            try {
+                Invoke-Icacls $adminGrant
+            } catch {
+                Invoke-TakeownAdministrators -Path $Target
+                Invoke-Icacls $adminGrant
+            }
+        }
+    } elseif (-not (Test-CanWrite -Path $Target)) {
+        Write-Warning "The managed OpenCode configuration in $Target is outdated and locked. Run 'scoop update opencode-desktop --force' as administrator, or let the auto-updater apply it."
+        return
     }
 
     Sync-ManagedTree -Source $Staging -Target $Target
     if (-not (Test-TreeEqual -Source $Staging -Target $Target)) {
         throw "Managed OpenCode configuration in $Target does not match the package after copying"
     }
-    Protect-ManagedDirectory -Path $Target -Elevated $elevated
-    Write-Host "Managed OpenCode configuration written to $Target and locked for SYSTEM and Administrators." -ForegroundColor Green
+    if ($fresh) {
+        Protect-ManagedDirectory -Path $Target -Elevated $elevated
+        Write-Host "Managed OpenCode configuration written to $Target and locked for SYSTEM and Administrators." -ForegroundColor Green
+    } else {
+        Write-Host "Managed OpenCode configuration in $Target updated. Existing permissions were left unchanged." -ForegroundColor Green
+    }
 }
 
-function ConvertFrom-Jsonc {
-    param([Parameter(Mandatory = $true)][string]$Text)
+function Remove-JsoncComment {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
 
-    # Strips // and /* */ comments outside strings, then trailing commas.
+    # Strips // and /* */ comments outside strings. Strings, escapes and URLs such as "https://host" stay as they are.
     $builder = New-Object System.Text.StringBuilder
     $inString = $false
     $i = 0
@@ -308,7 +331,57 @@ function ConvertFrom-Jsonc {
         [void]$builder.Append($c)
         $i++
     }
-    $clean = [regex]::Replace($builder.ToString(), ',(\s*[}\]])', '$1')
+    return $builder.ToString()
+}
+
+
+function Remove-JsoncTrailingComma {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+
+    # Drops a comma only when it stands outside a string and only whitespace separates it from } or ].
+    # Expects the text without comments. A comma inside a string such as "a,}" is never touched.
+    $builder = New-Object System.Text.StringBuilder
+    $inString = $false
+    $i = 0
+    while ($i -lt $Text.Length) {
+        $c = $Text[$i]
+        if ($inString) {
+            [void]$builder.Append($c)
+            if ($c -eq '\' -and $i + 1 -lt $Text.Length) {
+                [void]$builder.Append($Text[$i + 1])
+                $i += 2
+                continue
+            }
+            if ($c -eq '"') {
+                $inString = $false
+            }
+            $i++
+            continue
+        }
+        if ($c -eq '"') {
+            $inString = $true
+        } elseif ($c -eq ',') {
+            $next = $i + 1
+            while ($next -lt $Text.Length -and [char]::IsWhiteSpace($Text[$next])) {
+                $next++
+            }
+            if ($next -lt $Text.Length -and ($Text[$next] -eq '}' -or $Text[$next] -eq ']')) {
+                $i++
+                continue
+            }
+        }
+        [void]$builder.Append($c)
+        $i++
+    }
+    return $builder.ToString()
+}
+
+
+function ConvertFrom-Jsonc {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $withoutComments = Remove-JsoncComment -Text $Text
+    $clean = Remove-JsoncTrailingComma -Text $withoutComments
     return $clean | ConvertFrom-Json
 }
 
@@ -362,12 +435,15 @@ function Install-UserConfiguration {
     $rulesSource = Join-Path $Source 'rules\optional'
     $rulesTarget = Join-Path $configDir 'rules\optional'
     New-Item -ItemType Directory -Path $rulesTarget -Force | Out-Null
-    $shipped = @{}
+    # Personal files stay: a rule that already exists, edited or not, is never overwritten, and files that are
+    # not part of the package are never removed. Only shipped rules that are missing are added.
     foreach ($rule in Get-ChildItem -LiteralPath $rulesSource -File -Filter *.md) {
-        Copy-Item -LiteralPath $rule.FullName -Destination (Join-Path $rulesTarget $rule.Name) -Force
-        $shipped[$rule.Name] = $true
+        $destination = Join-Path $rulesTarget $rule.Name
+        if (-not (Test-Path -LiteralPath $destination)) {
+            Copy-Item -LiteralPath $rule.FullName -Destination $destination
+            Write-Host "Optional rule added: $destination" -ForegroundColor Green
+        }
     }
-    Get-ChildItem -LiteralPath $rulesTarget -File -Filter *.md | Where-Object { -not $shipped.ContainsKey($_.Name) } | Remove-Item -Force
 
     # Rules tied to file types. The plugin reads them only when the agent touches a matching file.
     $vorgabenSource = Join-Path $Source 'vorgaben'
@@ -378,18 +454,6 @@ function Install-UserConfiguration {
         if (-not (Test-Path -LiteralPath $destination)) {
             Copy-Item -LiteralPath $rule.FullName -Destination $destination
             Write-Host "Path rule added: $destination" -ForegroundColor Green
-        }
-    }
-
-    # Until 1.1.4 the design rule was loaded in every session. An unchanged copy goes; an edited one stays and warns.
-    $legacyDesign = Join-Path $rulesTarget 'design.md'
-    if (Test-Path -LiteralPath $legacyDesign) {
-        $legacyHash = (Get-FileHash -LiteralPath $legacyDesign -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($legacyHash -eq '1f836661d53e94d53b4e8ba119401bd8129175461c95ca34c4cf598d456be0c7') {
-            Remove-Item -LiteralPath $legacyDesign -Force
-            Write-Host "Design rule now loads only for UI files: $vorgabenTarget\design.md" -ForegroundColor Green
-        } else {
-            Write-Warning "$legacyDesign was edited and still loads in every session. Move your changes to $vorgabenTarget\design.md and delete it."
         }
     }
 

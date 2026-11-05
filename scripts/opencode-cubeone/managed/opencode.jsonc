@@ -808,7 +808,8 @@
             "tools": true,
             "input": [
               "text",
-              "image"
+              "image",
+              "pdf"
             ],
             "output": [
               "text"
@@ -826,13 +827,10 @@
                   "anthropic/claude-haiku-5.5",
                   "anthropic/claude-opus-5.5",
                   "anthropic/claude-sonnet-5.5",
-                  "mistralai/mistral-large-4-0",
                   "mistralai/mistral-medium-3-5",
-                  "mistralai/mistral-small-2603",
                   "openai/gpt-6-luna",
                   "openai/gpt-6.1-sol",
-                  "openai/gpt-6.1-terra",
-                  "z-ai/glm-5.3"
+                  "openai/gpt-6.1-terra"
                 ],
                 "cost_tier": "medium"
               }
@@ -862,13 +860,10 @@
                       "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
-                      "mistralai/mistral-small-2603",
                       "openai/gpt-6-luna",
                       "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "z-ai/glm-5.3"
+                      "openai/gpt-6.1-terra"
                     ],
                     "cost_tier": "medium"
                   }
@@ -898,13 +893,10 @@
                       "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
-                      "mistralai/mistral-small-2603",
                       "openai/gpt-6-luna",
                       "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "z-ai/glm-5.3"
+                      "openai/gpt-6.1-terra"
                     ],
                     "cost_tier": "low"
                   }
@@ -934,13 +926,10 @@
                       "anthropic/claude-haiku-5.5",
                       "anthropic/claude-opus-5.5",
                       "anthropic/claude-sonnet-5.5",
-                      "mistralai/mistral-large-4-0",
                       "mistralai/mistral-medium-3-5",
-                      "mistralai/mistral-small-2603",
                       "openai/gpt-6-luna",
                       "openai/gpt-6.1-sol",
-                      "openai/gpt-6.1-terra",
-                      "z-ai/glm-5.3"
+                      "openai/gpt-6.1-terra"
                     ],
                     "cost_tier": "max"
                   }
@@ -1014,36 +1003,18 @@
               {
                 "id": "auto-router",
                 "allowed_models": [
-                  "deepseek/deepseek-v4-flash",
-                  "deepseek/deepseek-v4-flash-0731",
                   "deepseek/deepseek-v4-flash-vision-exp",
-                  "deepseek/deepseek-v4-pro-0813",
                   "deepseek/deepseek-v4.1-flash",
                   "deepseek/deepseek-v4.1-flash-1017",
                   "google/gemma-4-31b-it",
-                  "inception/mercury-2.5",
-                  "inception/mercury-3",
-                  "inclusionai/ling-3.0-flash",
-                  "inclusionai/ling-3.1-flash",
-                  "minimax/minimax-m2",
-                  "minimax/minimax-m2.7",
                   "minimax/minimax-m3.1-flash",
-                  "mistralai/mistral-nemo",
                   "moonshotai/kimi-k2.5",
                   "moonshotai/kimi-k2.7-code",
                   "moonshotai/kimi-k3",
                   "moonshotai/kimi-k3.1-pro",
-                  "nvidia/nemotron-3.5-lightning",
-                  "qwen/qwen3.8-2.4t-a95b",
                   "qwen/qwen3.8-27b",
                   "tencent/hy4",
-                  "upstage/solar-mini4",
-                  "upstage/solar-pro4",
                   "xiaomi/mimo-v2.6-pro",
-                  "z-ai/glm-4.7",
-                  "z-ai/glm-5.1",
-                  "z-ai/glm-5.2",
-                  "z-ai/glm-5.3",
                   "z-ai/glm-5.3-flash"
                 ],
                 "cost_tier": "medium"
@@ -1064,36 +1035,18 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
-                      "deepseek/deepseek-v4-flash",
-                      "deepseek/deepseek-v4-flash-0731",
                       "deepseek/deepseek-v4-flash-vision-exp",
-                      "deepseek/deepseek-v4-pro-0813",
                       "deepseek/deepseek-v4.1-flash",
                       "deepseek/deepseek-v4.1-flash-1017",
                       "google/gemma-4-31b-it",
-                      "inception/mercury-2.5",
-                      "inception/mercury-3",
-                      "inclusionai/ling-3.0-flash",
-                      "inclusionai/ling-3.1-flash",
-                      "minimax/minimax-m2",
-                      "minimax/minimax-m2.7",
                       "minimax/minimax-m3.1-flash",
-                      "mistralai/mistral-nemo",
                       "moonshotai/kimi-k2.5",
                       "moonshotai/kimi-k2.7-code",
                       "moonshotai/kimi-k3",
                       "moonshotai/kimi-k3.1-pro",
-                      "nvidia/nemotron-3.5-lightning",
-                      "qwen/qwen3.8-2.4t-a95b",
                       "qwen/qwen3.8-27b",
                       "tencent/hy4",
-                      "upstage/solar-mini4",
-                      "upstage/solar-pro4",
                       "xiaomi/mimo-v2.6-pro",
-                      "z-ai/glm-4.7",
-                      "z-ai/glm-5.1",
-                      "z-ai/glm-5.2",
-                      "z-ai/glm-5.3",
                       "z-ai/glm-5.3-flash"
                     ],
                     "cost_tier": "medium"
@@ -1114,36 +1067,18 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
-                      "deepseek/deepseek-v4-flash",
-                      "deepseek/deepseek-v4-flash-0731",
                       "deepseek/deepseek-v4-flash-vision-exp",
-                      "deepseek/deepseek-v4-pro-0813",
                       "deepseek/deepseek-v4.1-flash",
                       "deepseek/deepseek-v4.1-flash-1017",
                       "google/gemma-4-31b-it",
-                      "inception/mercury-2.5",
-                      "inception/mercury-3",
-                      "inclusionai/ling-3.0-flash",
-                      "inclusionai/ling-3.1-flash",
-                      "minimax/minimax-m2",
-                      "minimax/minimax-m2.7",
                       "minimax/minimax-m3.1-flash",
-                      "mistralai/mistral-nemo",
                       "moonshotai/kimi-k2.5",
                       "moonshotai/kimi-k2.7-code",
                       "moonshotai/kimi-k3",
                       "moonshotai/kimi-k3.1-pro",
-                      "nvidia/nemotron-3.5-lightning",
-                      "qwen/qwen3.8-2.4t-a95b",
                       "qwen/qwen3.8-27b",
                       "tencent/hy4",
-                      "upstage/solar-mini4",
-                      "upstage/solar-pro4",
                       "xiaomi/mimo-v2.6-pro",
-                      "z-ai/glm-4.7",
-                      "z-ai/glm-5.1",
-                      "z-ai/glm-5.2",
-                      "z-ai/glm-5.3",
                       "z-ai/glm-5.3-flash"
                     ],
                     "cost_tier": "low"
@@ -1164,36 +1099,18 @@
                   {
                     "id": "auto-router",
                     "allowed_models": [
-                      "deepseek/deepseek-v4-flash",
-                      "deepseek/deepseek-v4-flash-0731",
                       "deepseek/deepseek-v4-flash-vision-exp",
-                      "deepseek/deepseek-v4-pro-0813",
                       "deepseek/deepseek-v4.1-flash",
                       "deepseek/deepseek-v4.1-flash-1017",
                       "google/gemma-4-31b-it",
-                      "inception/mercury-2.5",
-                      "inception/mercury-3",
-                      "inclusionai/ling-3.0-flash",
-                      "inclusionai/ling-3.1-flash",
-                      "minimax/minimax-m2",
-                      "minimax/minimax-m2.7",
                       "minimax/minimax-m3.1-flash",
-                      "mistralai/mistral-nemo",
                       "moonshotai/kimi-k2.5",
                       "moonshotai/kimi-k2.7-code",
                       "moonshotai/kimi-k3",
                       "moonshotai/kimi-k3.1-pro",
-                      "nvidia/nemotron-3.5-lightning",
-                      "qwen/qwen3.8-2.4t-a95b",
                       "qwen/qwen3.8-27b",
                       "tencent/hy4",
-                      "upstage/solar-mini4",
-                      "upstage/solar-pro4",
                       "xiaomi/mimo-v2.6-pro",
-                      "z-ai/glm-4.7",
-                      "z-ai/glm-5.1",
-                      "z-ai/glm-5.2",
-                      "z-ai/glm-5.3",
                       "z-ai/glm-5.3-flash"
                     ],
                     "cost_tier": "max"

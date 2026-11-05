@@ -43,8 +43,18 @@ function holdLength(text) {
       break
     }
   }
-  const compact = text.match(/@(?:b(?:[1-9]\d*)?|[1-9]\d*|blocked?)?$/i)
-  if (compact && compact[0].length > keep) keep = compact[0].length
+  // A trailing @ can close a complete tag. Holding it separately would leak the
+  // preceding @1 or @b1 into the stream before the token can be removed.
+  const endsWithCompleteTag = /@(?:[1-9]\d*|b[1-9]\d*|blocked)@$/i.test(text)
+  if (endsWithCompleteTag && keep === 1) keep = 0
+  const compact = text.match(/@(?:b[1-9]\d*|[1-9]\d*)?$/i)
+  if (!endsWithCompleteTag && compact && compact[0].length > keep) keep = compact[0].length
+  if (!endsWithCompleteTag) {
+    const lower = text.toLowerCase()
+    for (let len = 1; len < '@blocked@'.length; len++) {
+      if (lower.endsWith('@blocked@'.slice(0, len))) keep = Math.max(keep, len)
+    }
+  }
   const dcpId = text.match(/@dcp-id-(?:[0-9a-f]{0,128})?$/i)
   if (dcpId && dcpId[0].length > keep) keep = dcpId[0].length
   return keep
@@ -211,6 +221,36 @@ function rewriteMessage(json, filter, flush) {
     }
   }
   return changed
+}
+
+export function rewriteJsonResponse(text) {
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return text
+  }
+  let changed = false
+  const rewriteText = (target, key) => {
+    if (writeText(target, key, createDisplayFilter(), true)) changed = true
+  }
+  const rewriteParts = (parts) => {
+    if (!Array.isArray(parts)) return
+    for (const part of parts) {
+      if (part?.type === "text" || part?.type === "output_text") rewriteText(part, "text")
+    }
+  }
+  for (const choice of Array.isArray(json?.choices) ? json.choices : []) {
+    rewriteText(choice?.message, "content")
+    rewriteParts(choice?.message?.content)
+    rewriteText(choice?.delta, "content")
+  }
+  rewriteParts(json?.content)
+  for (const item of Array.isArray(json?.output) ? json.output : []) {
+    if (item?.type === "message") rewriteParts(item.content)
+  }
+  if (!changed) return text
+  return JSON.stringify(json)
 }
 
 function rewriteDataLine(line, filter) {

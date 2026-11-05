@@ -17,7 +17,12 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutFile = (Join-Path $PSScriptRoot 'managed\opencode.jsonc')
+    [string]$OutFile = (Join-Path $PSScriptRoot 'managed\opencode.jsonc'),
+
+    # Read the catalog and the ZDR endpoint list from JSON files (the {"data": [...]} body of the OpenRouter
+    # responses) instead of the network. Meant for tests with synthetic data.
+    [string]$CatalogFile,
+    [string]$ZdrEndpointsFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +39,36 @@ $AutoRouterModel = 'openrouter/auto'
 $SaleProviderId = 'openrouter-zdr-sale'
 $SaleModelKey = 'openrouter/auto'
 $saleModels = [ordered]@{}
+# Auto may only route to models that can read screenshots. These are concrete OpenRouter slugs, because the
+# router matches slugs and not aliases. The lists only ever narrow what OpenRouter reports: a model that is not
+# listed here is never offered, and an empty result skips the Auto entry instead of falling back to every model.
+# Auto (ZDR, EU): EU endpoint plus image and PDF input.
+$AutoEuModels = @(
+    'anthropic/claude-haiku-5.5'
+    'anthropic/claude-opus-5.5'
+    'anthropic/claude-sonnet-5.5'
+    'mistralai/mistral-medium-3-5'
+    'openai/gpt-6-luna'
+    'openai/gpt-6.1-sol'
+    'openai/gpt-6.1-terra'
+)
+# Auto (ZDR, SALE): image input. All of them are baked in; cubeone-sale narrows them to the discounted ones.
+# Mirrored in plugins\cubeone-sale\sale.js, which a test compares against this list.
+$AutoSaleModels = @(
+    'deepseek/deepseek-v4-flash-vision-exp'
+    'deepseek/deepseek-v4.1-flash'
+    'deepseek/deepseek-v4.1-flash-1017'
+    'google/gemma-4-31b-it'
+    'minimax/minimax-m3.1-flash'
+    'moonshotai/kimi-k2.5'
+    'moonshotai/kimi-k2.7-code'
+    'moonshotai/kimi-k3'
+    'moonshotai/kimi-k3.1-pro'
+    'qwen/qwen3.8-27b'
+    'tencent/hy4'
+    'xiaomi/mimo-v2.6-pro'
+    'z-ai/glm-5.3-flash'
+)
 # ~author/family-latest follows the newest model of that family. Families without such an alias, and
 # Kimi, stay on a concrete id: ~moonshotai/kimi-latest currently points at kimi-k3, which is older
 # than kimi-k3.1-pro. ~deepseek/deepseek-v4-flash-latest points at the older July snapshot, so the
@@ -170,8 +205,18 @@ function Get-MillionTokenPrice($Endpoint) {
 }
 
 $headers = @{ 'User-Agent' = 'cubeone-bucket/opencode-models' }
-$catalog = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/models' -Headers $headers).data
-$zdrEndpoints = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/endpoints/zdr' -Headers $headers).data
+if ($CatalogFile) {
+    $catalog = (Get-Content -LiteralPath $CatalogFile -Raw -Encoding utf8 | ConvertFrom-Json).data
+}
+else {
+    $catalog = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/models' -Headers $headers).data
+}
+if ($ZdrEndpointsFile) {
+    $zdrEndpoints = (Get-Content -LiteralPath $ZdrEndpointsFile -Raw -Encoding utf8 | ConvertFrom-Json).data
+}
+else {
+    $zdrEndpoints = (Invoke-RestMethod -Uri 'https://openrouter.ai/api/v1/endpoints/zdr' -Headers $headers).data
+}
 
 $models = [ordered]@{}
 $concreteOf = @{}
@@ -194,8 +239,10 @@ foreach ($id in $CuratedModels) {
         continue
     }
 
-    # OpenCode reads modalities, not capabilities. Without it, a pasted screenshot is replaced
-    # by "this model does not support image input" before the model sees the file.
+    # OpenCode V2 reads capabilities.input and ignores the legacy modalities block (checked against
+    # opencode 2.2.5: a pdf only in modalities is rejected with "this model does not support pdf input", a pdf in
+    # capabilities.input reaches the provider as a file part). Without image here, a pasted screenshot is
+    # replaced by that message before the model sees the file. modalities is still written for older readers.
     # OpenRouter calls a PDF "file"; OpenCode's modality name is "pdf".
     $openCodeInput = [System.Collections.Generic.List[string]]::new()
     [void]$openCodeInput.Add('text')
@@ -260,26 +307,36 @@ if (-not $models.Contains($DefaultModel)) {
 }
 
 $autoRouter = $catalog | Where-Object { $_.id -eq $AutoRouterModel } | Select-Object -First 1
+# Auto is one request, so it cannot carry a different EU pin per child model.
+# It therefore only offers models that have an EU endpoint, and the request itself
+# is pinned to the union of those endpoints. The router matches concrete slugs, so the
+# allow-list is the model each alias points at today, not the alias itself.
+# On top of that only $AutoEuModels qualify, and each must take image and PDF input. An alias that now
+# points at another slug drops out here instead of widening the list.
+$euKeys = @($models.Keys | Where-Object {
+        $null -ne $models[$_].body.provider.only -and
+        $AutoEuModels -contains $concreteOf[$_] -and
+        $models[$_].modalities.input -contains 'image' -and
+        $models[$_].modalities.input -contains 'pdf'
+    })
+$euSlugs = @($euKeys | ForEach-Object { $concreteOf[$_] })
+foreach ($slug in $AutoEuModels) {
+    if ($euSlugs -notcontains $slug) {
+        Write-Warning "$slug is on the Auto (ZDR, EU) list but has no EU endpoint with image and PDF input. It was left out."
+    }
+}
 if (-not $autoRouter) {
     Write-Warning "$AutoRouterModel is no longer in the OpenRouter catalog and was skipped."
 }
+elseif ($euKeys.Count -eq 0) {
+    Write-Warning 'No model on the Auto (ZDR, EU) list passed the check. Auto (ZDR, EU) was skipped.'
+}
 else {
-    # Auto is one request, so it cannot carry a different EU pin per child model.
-    # It therefore only offers models that have an EU endpoint, and the request itself
-    # is pinned to the union of those endpoints. The router matches concrete slugs, so the
-    # allow-list is the model each alias points at today, not the alias itself.
-    $euKeys = @($models.Keys | Where-Object { $null -ne $models[$_].body.provider.only })
-    if ($euKeys.Count -eq 0) {
-        Write-Warning 'No model has an EU endpoint. Auto keeps the full ZDR list without a region pin.'
-        $allowedModels = @($models.Keys | ForEach-Object { $concreteOf[$_] })
-        $euOnly = @()
-        $autoModels = @($models.Values)
-    }
-    else {
-        $allowedModels = @($euKeys | ForEach-Object { $concreteOf[$_] } | Sort-Object -Unique)
-        $euOnly = @($euKeys | ForEach-Object { $models[$_].body.provider.only } | Sort-Object -Unique)
-        $autoModels = @($euKeys | ForEach-Object { $models[$_] })
-    }
+    $allowedModels = @($euSlugs | Sort-Object -Unique)
+    # The region pin stays the union over every curated model with an EU endpoint, as before the image/PDF
+    # list existed. The allow-list above is what narrows the models; the pin only limits the regions.
+    $euOnly = @($models.Keys | ForEach-Object { $models[$_].body.provider.only } | Sort-Object -Unique)
+    $autoModels = @($euKeys | ForEach-Object { $models[$_] })
     $minContext = ($autoModels | ForEach-Object { $_.limit.context } | Measure-Object -Minimum).Minimum
     $minOutput = ($autoModels | ForEach-Object { $_.limit.output } | Measure-Object -Minimum).Minimum
 
@@ -337,32 +394,43 @@ else {
     }
 }
 
-# Sale follows the live discount flag, not the curated list. pricing.discount is 0 when an endpoint
-# is not on sale. The baked allow-list is the fallback; cubeone-sale replaces it at every OpenCode start
-# because the discounted set changes between runs of this script. No EU pin: provider.only stays absent.
+# Sale offers every model of $AutoSaleModels that has a strict ZDR endpoint with tool support and takes image
+# input, whether or not it is discounted right now: that list is the fixed upper bound and a run of this script
+# must not shrink it. cubeone-sale narrows it to the currently discounted models on every request. The baked
+# list is also what OpenCode uses before the first successful refresh and while the discount list is offline.
+# No EU pin: provider.only stays absent.
 $saleIds = @(
-    $zdrEndpoints |
+    $AutoSaleModels |
         Where-Object {
-            -not $_.safety_retention -and
-            ($_.supported_parameters -contains 'tools') -and
-            ([double]$_.pricing.discount -gt 0) -and
-            $_.model_id -and
-            ([string]$_.model_id -notlike 'openrouter/*')
+            $slug = $_
+            $served = $catalog | Where-Object { $_.id -eq $slug } | Select-Object -First 1
+            $endpoint = $zdrEndpoints | Where-Object {
+                $_.model_id -eq $slug -and
+                -not $_.safety_retention -and
+                ($_.supported_parameters -contains 'tools')
+            } | Select-Object -First 1
+            $ready = $null -ne $served -and $null -ne $endpoint -and
+                (@($served.architecture.input_modalities) -contains 'image')
+            if (-not $ready) {
+                Write-Warning "$slug is on the Auto (ZDR, SALE) list but has no strict ZDR endpoint with tools and image input. It was left out."
+            }
+            $ready
         } |
-        ForEach-Object { [string]$_.model_id } |
         Sort-Object -Unique
 )
 if ($saleIds.Count -eq 0) {
-    Write-Warning 'No discounted strict ZDR model with tools. Auto (ZDR, SALE) was skipped.'
+    Write-Warning 'No model on the SALE list has a strict ZDR endpoint with tools and image input. Auto (ZDR, SALE) was skipped.'
 }
 else {
     $saleCatalog = @($catalog | Where-Object { $saleIds -contains $_.id })
     $saleInput = [System.Collections.Generic.List[string]]::new()
     [void]$saleInput.Add('text')
+    # SALE offers text and images only, even when the catalog reports file input. A PDF sent to a model without
+    # native file input is parsed by OpenRouter with Mistral OCR, which has no guaranteed Zero Data Retention.
+    # Without pdf here OpenCode refuses the attachment before anything leaves the machine.
     foreach ($served in $saleCatalog) {
         foreach ($name in @($served.architecture.input_modalities)) {
             if ($name -eq 'image' -and -not $saleInput.Contains('image')) { [void]$saleInput.Add('image') }
-            if (($name -eq 'file' -or $name -eq 'pdf') -and -not $saleInput.Contains('pdf')) { [void]$saleInput.Add('pdf') }
         }
     }
     $saleModalities = @($saleInput)
@@ -404,7 +472,7 @@ else {
             [ordered]@{ id = 'intelligence'; body = (& $saleBody 'max') }
         )
     }
-    Write-Host ("Auto (ZDR, SALE)  ->  {0} discounted models" -f $saleIds.Count)
+    Write-Host ("Auto (ZDR, SALE)  ->  {0} models" -f $saleIds.Count)
 }
 
 $searchConcrete = if ($concreteOf.ContainsKey($SearchModel)) { $concreteOf[$SearchModel] } else { $SearchModel }
@@ -591,7 +659,8 @@ $config = [ordered]@{
         }
         $ContextPruningPackage
         $MemoryPackage
-        # Rewrites the SALE allow-list from the live discount flag. The config hook runs before the model is built.
+        # Narrows the SALE allow-list to the models that are discounted right now, never beyond $AutoSaleModels.
+        # A V2 http.request hook on the SALE provider does that on the outgoing request.
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-sale'
         }

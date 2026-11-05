@@ -23,6 +23,10 @@
       "openseo": {
         "type": "remote",
         "url": "https://seo.cubeone.de/mcp"
+      },
+      "trace": {
+        "type": "remote",
+        "url": "https://trace.cubeone.de/mcp"
       }
     }
   }
