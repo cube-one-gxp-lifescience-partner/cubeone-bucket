@@ -171,6 +171,7 @@ function New-LinuxPayload {
     [System.IO.File]::WriteAllText((Join-Path $Destination 'opencode.jsonc'), $text, $utf8)
     Copy-Item -LiteralPath (Join-Path $Source 'managed\rules') -Destination (Join-Path $Destination 'rules') -Recurse
     Copy-Item -LiteralPath (Join-Path $Source 'managed\vorgaben') -Destination (Join-Path $Destination 'vorgaben') -Recurse
+    Copy-Item -LiteralPath (Join-Path $Source 'managed\skills') -Destination (Join-Path $Destination 'skills') -Recurse
     $plugins = Join-Path $Destination 'cubeone\plugins'
     New-Item -ItemType Directory -Path $plugins -Force | Out-Null
     foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view', 'cubeone-sale')) {

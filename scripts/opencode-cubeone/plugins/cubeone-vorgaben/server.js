@@ -166,10 +166,22 @@ export default {
     const stateOf = (sessionID) => {
       let state = sessions.get(sessionID)
       if (!state) {
-        state = { visible: new Set(), shown: new Set(), directory: undefined }
+        // matched keeps every rule that applied this session. A compacted history or a dropped tool
+        // error would otherwise forget it, and the next step would edit without the text.
+        state = { visible: new Set(), shown: new Set(), matched: new Map(), directory: undefined }
         sessions.set(sessionID, state)
       }
       return state
+    }
+    const note = (state, hits) => {
+      for (const hit of hits) {
+        const previous = state.matched.get(hit.rule.id)
+        if (!previous) {
+          state.matched.set(hit.rule.id, { rule: hit.rule, files: [...hit.files] })
+          continue
+        }
+        for (const file of hit.files) if (!previous.files.includes(file)) previous.files.push(file)
+      }
     }
     const directoryOf = async (sessionID, state) => {
       if (state.directory === undefined) {
@@ -184,9 +196,21 @@ export default {
       const state = stateOf(input.sessionID)
       state.visible = visibleRules(input.messages)
       state.shown.clear()
+      // A rule that already matched stays due until its full text is in the conversation again.
+      // Putting it here, before any tool runs, is what the model reads even when the earlier
+      // tool error was dropped or the history was compacted.
+      const due = []
+      for (const hit of state.matched.values()) {
+        if (state.visible.has(hit.rule.id)) continue
+        due.push(hit)
+        state.shown.add(hit.rule.id)
+      }
       // Every session, fresh from disk each time: an off switch in the GUI takes effect on the very next message.
       const active = currentAlways()
-      if (active.length) input.system = [...(input.system ?? []), { type: "text", text: active.map((rule) => rule.body).join("\n\n") }]
+      const parts = []
+      if (active.length) parts.push(active.map((rule) => rule.body).join("\n\n"))
+      if (due.length) parts.push(due.map((hit) => fullBlock(hit.rule, hit.files)).join("\n\n"))
+      if (parts.length) input.system = [...(input.system ?? []), { type: "text", text: parts.join("\n\n") }]
     })
 
     // A first change to a file whose rule the model has not seen yet does not run. The error carries the rule, so
@@ -197,9 +221,9 @@ export default {
       if (!active.length) return
       const state = stateOf(input.sessionID)
       const { files, written } = touched(input.tool, input.input)
-      const missing = applicable(active, files, written, await directoryOf(input.sessionID, state)).filter(
-        (hit) => !known(state, hit.rule.id),
-      )
+      const hits = applicable(active, files, written, await directoryOf(input.sessionID, state))
+      note(state, hits)
+      const missing = hits.filter((hit) => !known(state, hit.rule.id))
       if (!missing.length) return
       for (const hit of missing) state.shown.add(hit.rule.id)
       throw new Error(
@@ -221,6 +245,7 @@ export default {
         const { files, written } = touched(input.tool, input.input)
         const text = input.tool === "read" ? resultText(input.result) : written
         const hits = applicable(active, files, text, await directoryOf(input.sessionID, state))
+        note(state, hits)
         if (!hits.length) return
         const blocks = hits.map((hit) => {
           if (known(state, hit.rule.id)) return referenceBlock(hit.rule, hit.files)

@@ -1,5 +1,5 @@
 {
-    "version": "2.2.5",
+    "version": "2.2.5-3",
     "description": "OpenCode Desktop with the cube one configuration: only OpenRouter models with zero data retention, locked managed settings and company rules, cube one MCP servers and dictation via OpenRouter EU",
     "homepage": "https://opencode.ai",
     "license": "MIT",
@@ -12,11 +12,11 @@
         "64bit": {
             "url": [
                 "https://opencode.ai/files/bin/2.2.5/opencode-desktop-win-x64.exe#/dl.7z",
-                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.11.zip"
+                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.12.zip"
             ],
             "hash": [
                 "634cd9b3b0e6dea71285dc4ed98d54d6617721d5e302bc8c8661fc957c321cc8",
-                "34f0e46d84d33944ae2c563a83d58e216e9e30a1001446ac20cb3a8c39579c7c"
+                "25948da42cbfed444283a38e6caf7c78310d1b39e54638f8f1a45f1ccbccf7e4"
             ],
             "extract_to": [
                 "",
@@ -75,7 +75,7 @@
             "64bit": {
                 "url": [
                     "https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z",
-                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.11.zip"
+                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.12.zip"
                 ]
             }
         }

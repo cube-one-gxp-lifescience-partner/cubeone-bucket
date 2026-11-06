@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Machine part (%ProgramData%\opencode): the managed opencode.jsonc, the mandatory rules, the
-    path rules (vorgaben) and the cube one plugins. OpenCode ranks this directory above user and project configuration.
+    path rules (vorgaben), the skills and the cube one plugins. OpenCode ranks this directory above user and project configuration.
     A directory created by this run is locked: writable only for SYSTEM and Administrators. An existing
     directory keeps its ACL and every write permission it already has, also when it is already current.
 
@@ -466,7 +466,7 @@ function Install-UserConfiguration {
 }
 
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js', 'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js', 'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js', 'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js', 'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js', 'managed\skills\design-patterns\SKILL.md', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -478,6 +478,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\opencode.jsonc') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\rules') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\vorgaben') -Destination $staging -Recurse
+    Copy-Item -LiteralPath (Join-Path $SourceDir 'managed\skills') -Destination $staging -Recurse
     Copy-Item -LiteralPath (Join-Path $SourceDir 'Install-OpenCodeRemote.ps1') -Destination $staging
     $pluginTarget = Join-Path $staging 'cubeone\plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $pluginTarget 'dist') -Force | Out-Null

@@ -22,10 +22,13 @@ test("the shipped rules all load", () => {
     "html-css",
     "java",
     "javascript",
+    "mcp",
+    "oidc",
     "php",
     "powershell",
     "python",
     "r",
+    "sicherheit",
     "sql",
     "vba",
   ])
@@ -40,9 +43,9 @@ test("globs", () => {
 
 test("a file gets only the rule whose glob matches it", () => {
   assert.deepEqual(ids(["src/app.py"]), ["python"])
-  assert.deepEqual(ids(["db/schema.sql"]), ["sql"])
+  assert.deepEqual(ids(["db/schema.sql"]), ["sicherheit", "sql"])
   assert.deepEqual(ids([".gitlab-ci.yml"]), ["gitlab-ci"])
-  assert.deepEqual(ids(["src/auth/callback.ts"]), [])
+  assert.deepEqual(ids(["src/auth/callback.ts"]), ["oidc"])
 })
 
 test("folders above the project do not count", () => {
@@ -112,10 +115,27 @@ test("a read appends the rule once, then a reference", async () => {
   assert.match(second.result.content, /cubeone-verweis:sql/)
   assert.doesNotMatch(second.result.content, /SQLFluff/)
 
-  await hooks.context({ sessionID: "s2", messages: [{ text: "compacted summary" }] })
+  const compacted = { sessionID: "s2", messages: [{ text: "compacted summary" }] }
+  await hooks.context(compacted)
+  assert.match(compacted.system[0].text, /cubeone-vorgabe:sql/)
+  assert.match(compacted.system[0].text, /SQLFluff/)
   const third = read()
   await hooks["execute.after"](third)
-  assert.match(third.result.content, /cubeone-vorgabe:sql/)
+  assert.match(third.result.content, /cubeone-verweis:sql/)
+  assert.doesNotMatch(third.result.content, /SQLFluff/)
+})
+
+test("a stopped edit still puts the rule into the next turn when the error is gone", async () => {
+  const { ctx, hooks } = harness()
+  await plugin.setup(ctx)
+  await hooks.context({ sessionID: "s3", messages: [] })
+  const call = { tool: "edit", sessionID: "s3", input: { path: path.join(project, "src/app.py"), content: "x" } }
+  await assert.rejects(hooks["execute.before"](call), /cubeone-vorgabe:python/)
+  const next = { sessionID: "s3", messages: [{ text: "the tool failed" }] }
+  await hooks.context(next)
+  assert.match(next.system[0].text, /cubeone-vorgabe:python/)
+  assert.match(next.system[0].text, /PEP 8/)
+  await hooks["execute.before"](call)
 })
 
 test("parseAlwaysRule takes the title from the first heading, else falls back to the id", () => {
