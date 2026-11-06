@@ -205,7 +205,10 @@ function Sync-ManagedTree {
     # before the first one is touched, so a locked file cannot leave the tree half replaced.
     $locked = @(@($changed) + @($stale) | Where-Object { Test-FileLocked -Path (Join-Path $Target $_) })
     if ($locked.Count -gt 0) {
-        throw "OpenCode is running and keeps files in $Target open ($($locked -join ', ')). Close OpenCode and run the installation again. Nothing was changed."
+        # Do not throw. Scoop runs this script before it links the app, and a throw leaves an
+        # install without a current junction. Status then says the install failed and the manifest was removed.
+        Write-Warning "OpenCode is running and keeps files in $Target open ($($locked -join ', ')). Close OpenCode and run the installation again. Nothing was changed."
+        return 'locked'
     }
 
     foreach ($file in $changed) {
@@ -277,7 +280,9 @@ function Install-ManagedConfiguration {
         return
     }
 
-    Sync-ManagedTree -Source $Staging -Target $Target
+    if ((Sync-ManagedTree -Source $Staging -Target $Target) -eq 'locked') {
+        return
+    }
     if (-not (Test-TreeEqual -Source $Staging -Target $Target)) {
         throw "Managed OpenCode configuration in $Target does not match the package after copying"
     }
@@ -517,5 +522,13 @@ if (-not $voiceKey) {
 
 $remoteScript = Join-Path $SourceDir 'Install-OpenCodeRemote.ps1'
 if (Test-Path -LiteralPath $remoteScript) {
-    & $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
+    try {
+        & $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
+    } catch {
+        # The desktop app is already configured. A remote failure must not fail the Scoop install.
+        Write-Warning "Remote OpenCode setup was skipped: $($_.Exception.Message)"
+    }
 }
+# Scoop treats any non-zero exit as a failed install and then cannot find the manifest.
+$global:LASTEXITCODE = 0
+exit 0
