@@ -1,10 +1,10 @@
 {
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "ArbeitsbeginnApp - Work start application from cube one",
     "homepage": "https://cubeone.de",
     "license": "Proprietary",
-    "url": "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/ArbeitsbeginnApp.exe",
-    "hash": "d0bb00522d4d146603f9b9f943ce40078eb61edd599a4dc7a64c2d170f499be9",
+    "url": "https://update.cubeone.de/files/8eae1a7f-81ad-4650-865d-2dd6560435e4",
+    "hash": "f93ffe6cb665d58af857c51880fd1a0f6880a8af5fd49b121b3d034645619c15",
     "shortcuts": [
         [
             "ArbeitsbeginnApp.exe",
