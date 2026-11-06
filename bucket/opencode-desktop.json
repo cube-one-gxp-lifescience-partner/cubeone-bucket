@@ -1,5 +1,5 @@
 {
-    "version": "2.2.5-4",
+    "version": "2.2.5",
     "description": "OpenCode Desktop with the cube one configuration: only OpenRouter models with zero data retention, locked managed settings and company rules, cube one MCP servers and dictation via OpenRouter EU",
     "homepage": "https://opencode.ai",
     "license": "MIT",
