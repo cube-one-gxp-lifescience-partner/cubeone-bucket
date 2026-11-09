@@ -96,7 +96,8 @@ extra line would not be safe.
   ignores every later `SetEnv` line). Only where no `SetEnv` applies to them yet, put
   `Host coding-vm-1 ... coding-vm-8` with `    SetEnv CUBEONE_PRINCIPAL=<id>`, followed by `Host *`, in front of the
   old settings at the top of the file, so those settings keep applying to every host. Never add just the two lines
-  at the top: that would move the old top-of-file settings into the block or hide an existing `SetEnv`.- The new text is only inserted at the very start of the file (after a BOM): the block with the eight aliases, then
+  at the top: that would move the old top-of-file settings into the block or hide an existing `SetEnv`.
+- The new text is only inserted at the very start of the file (after a BOM): the block with the eight aliases, then
   `Host *` so settings that stood at the top of the file still apply to every host, then the original bytes. Before
   anything is written, `ssh -G` is run on a temporary copy: the eight aliases must get exactly this id and nothing
   else, and no other setting of the eight aliases or of an unrelated alias may change. Otherwise the file stays
