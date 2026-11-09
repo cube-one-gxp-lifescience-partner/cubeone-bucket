@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { DatabaseSync } from "node:sqlite"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const source = path.join(here, "..", "gui-experimental.cjs")
@@ -232,7 +232,7 @@ test("a database without the state table, or with a different one, is not change
 test("a file that is not a database, or an empty file, is not changed", () => {
   const box = sandbox()
   try {
-    writeFileSync(box.db, "this is not an sqlite database, it is longer than a header would be .......................")
+    writeFileSync(box.db, "this is not an sqlite database ".repeat(10))
     const before = sha(box.db)
     assert.deepEqual(plugin.seedServers({ userData: box.userData, home: box.home }), { status: "error" })
     assert.equal(sha(box.db), before)
@@ -273,6 +273,7 @@ test("a writer that holds the database makes the seed an error without a change;
     const script = [
       'const { DatabaseSync } = require("node:sqlite")',
       "const db = new DatabaseSync(process.argv[1])",
+      'db.exec(\"PRAGMA busy_timeout = 5000\")',
       'db.exec("BEGIN IMMEDIATE")',
       'process.stdout.write("locked\\n")',
       "setTimeout(() => {",
@@ -393,7 +394,7 @@ test("main leaves the marker false for no alias, no database, no schema, an inva
     ["no-database", () => {}],
     ["schema", (box) => createDatabase(box.db, { table: "CREATE TABLE other(a text)" })],
     ["invalid", (box) => createDatabase(box.db, { sshValue: "not json" })],
-    ["error", (box) => writeFileSync(box.db, "garbage garbage garbage garbage garbage garbage garbage garbage garbage")],
+    ["error", (box) => writeFileSync(box.db, "garbage garbage garbage ".repeat(10))],
   ]
   for (const [expected, prepare] of cases) {
     const box = sandbox()
@@ -430,18 +431,302 @@ test("main never throws: a failing marker store, log or electron only ends the a
   }
 })
 
+const FLAT = "ssh.servers"
+const settingsFile = (box) => path.join(box.userData, "opencode.settings")
+const writeSettings = (box, text) => writeFileSync(settingsFile(box), text)
+const entry = (name) => ({ id: name, target: name, name })
+
+test("a missing row with a list with entries under the flat key ssh.servers is never replaced, and no file changes", () => {
+  const lists = [
+    JSON.stringify({ [FLAT]: [entry("mine")] }),
+    JSON.stringify({ other: 1, [FLAT]: [{ id: "x", target: "u@h", name: "Mine", extra: { n: 12345678901234567890 }, text: "äö" }], tail: [1, 2] }),
+    `\uFEFF${JSON.stringify({ [FLAT]: [null] })}`,
+    `{\n\t"${FLAT}": [ ]\n,"${FLAT}": [1]}`,
+  ]
+  for (const text of lists) {
+    const box = sandbox()
+    try {
+      createDatabase(box.db, { noSshRow: true })
+      writeSettings(box, text)
+      const dbBefore = sha(box.db)
+      const settingsBefore = sha(settingsFile(box))
+      assert.deepEqual(plugin.seedServers({ userData: box.userData, home: box.home }), { status: "kept" }, text)
+      assert.equal(sha(box.db), dbBefore, "the database changed")
+      assert.equal(sha(settingsFile(box)), settingsBefore, "the settings file changed")
+      assert.equal(readFileSync(settingsFile(box), "utf8"), text)
+      assert.equal(readRows(box.db).some((row) => row.name === "plugin.ssh"), false)
+    } finally {
+      box.cleanup()
+    }
+  }
+})
+
+test("a missing row is seeded when no list would be imported: no file, no key, an empty list, a nested ssh.servers, a blank file", () => {
+  const cases = [undefined, "{}", "   \n", JSON.stringify({ [FLAT]: [] }), JSON.stringify({ ssh: { servers: [entry("nested")] } }), JSON.stringify({ other: [entry("a")] }), "\uFEFF{}"]
+  for (const text of cases) {
+    const box = sandbox()
+    try {
+      createDatabase(box.db, { noSshRow: true })
+      if (text !== undefined) writeSettings(box, text)
+      const settingsBefore = text === undefined ? undefined : sha(settingsFile(box))
+      assert.equal(plugin.seedServers({ userData: box.userData, home: box.home }).status, "seeded", String(text))
+      assert.equal(sshRow(readRows(box.db)).value, VALUE(ALIASES))
+      if (text === undefined) assert.equal(existsSync(settingsFile(box)), false, "a settings file was created")
+      else assert.equal(sha(settingsFile(box)), settingsBefore, "the settings file changed")
+    } finally {
+      box.cleanup()
+    }
+  }
+})
+
+test("a missing row with settings that cannot be understood writes nothing: malformed, not an object, null, a string, an object, a number", () => {
+  const texts = [
+    '{ "ssh.servers": [',
+    "not json",
+    "[1,2]",
+    '"text"',
+    "null",
+    "42",
+    JSON.stringify({ [FLAT]: null }),
+    JSON.stringify({ [FLAT]: "[]" }),
+    JSON.stringify({ [FLAT]: { id: "a" } }),
+    JSON.stringify({ [FLAT]: 0 }),
+    JSON.stringify({ [FLAT]: false }),
+  ]
+  for (const text of texts) {
+    const box = sandbox()
+    try {
+      createDatabase(box.db, { noSshRow: true })
+      writeSettings(box, text)
+      const dbBefore = sha(box.db)
+      assert.deepEqual(plugin.seedServers({ userData: box.userData, home: box.home }), { status: "invalid" }, text)
+      assert.equal(sha(box.db), dbBefore)
+      assert.equal(readFileSync(settingsFile(box), "utf8"), text)
+    } finally {
+      box.cleanup()
+    }
+  }
+})
+
+test("a missing row with a settings file that is a folder, or too big, writes nothing", () => {
+  const box = sandbox()
+  try {
+    createDatabase(box.db, { noSshRow: true })
+    const dbBefore = sha(box.db)
+    mkdirSync(settingsFile(box))
+    assert.deepEqual(plugin.seedServers({ userData: box.userData, home: box.home }), { status: "invalid" })
+    rmSync(settingsFile(box), { recursive: true })
+    writeSettings(box, `{"a":"${"x".repeat(1024 * 1024)}","${FLAT}":[]}`)
+    assert.deepEqual(plugin.seedServers({ userData: box.userData, home: box.home }), { status: "invalid" })
+    assert.equal(sha(box.db), dbBefore)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test("the flat key is only consulted while the row is missing: an existing row decides alone", () => {
+  const nonempty = JSON.stringify({ [FLAT]: [entry("legacy")] })
+  const box = sandbox()
+  try {
+    // An empty list in the row wins over a list in the settings, because the app ignores the settings then.
+    createDatabase(box.db, { sshValue: "[]" })
+    writeSettings(box, nonempty)
+    assert.equal(plugin.seedServers({ userData: box.userData, home: box.home }).status, "seeded")
+    assert.equal(sshRow(readRows(box.db)).value, VALUE(ALIASES))
+    assert.equal(readFileSync(settingsFile(box), "utf8"), nonempty)
+  } finally {
+    box.cleanup()
+  }
+  for (const [sshValue, expected] of [['[{"id":"mine"}]', "kept"], ["not json", "invalid"], ["null", "invalid"]]) {
+    const other = sandbox()
+    try {
+      createDatabase(other.db, { sshValue })
+      writeSettings(other, "{ malformed")
+      const before = readRows(other.db)
+      assert.equal(plugin.seedServers({ userData: other.userData, home: other.home }).status, expected)
+      assert.deepEqual(readRows(other.db), before)
+      assert.equal(readFileSync(settingsFile(other), "utf8"), "{ malformed")
+    } finally {
+      other.cleanup()
+    }
+  }
+})
+
+test("a row that appears while the seed waits for the lock is kept, and the settings are read only after the lock is held", async () => {
+  const box = sandbox()
+  try {
+    createDatabase(box.db, { noSshRow: true })
+    writeSettings(box, JSON.stringify({ [FLAT]: [] }))
+    const script = [
+      'const { DatabaseSync } = require("node:sqlite")',
+      "const db = new DatabaseSync(process.argv[1])",
+      'db.exec(\"PRAGMA busy_timeout = 5000\")',
+      'db.exec("BEGIN IMMEDIATE")',
+      'process.stdout.write("locked\\n")',
+      "setTimeout(() => {",
+      `  db.prepare("INSERT INTO state VALUES ('plugin.ssh', 'servers', ?, 77)").run('[{"id":"user","target":"user","name":"user"}]')`,
+      '  db.exec("COMMIT")',
+      "  db.close()",
+      "}, 400)",
+    ].join("\n")
+    const child = spawn(process.execPath, ["-e", script, box.db], { stdio: ["ignore", "pipe", "inherit"] })
+    const exited = new Promise((resolve) => {
+      child.on("exit", resolve)
+    })
+    await new Promise((resolve) => {
+      child.stdout.once("data", resolve)
+    })
+    const result = plugin.seedServers({ userData: box.userData, home: box.home, busyMs: 5000 })
+    assert.equal(await exited, 0)
+    assert.deepEqual(result, { status: "kept" })
+    const row = sshRow(readRows(box.db))
+    assert.equal(row.value, '[{"id":"user","target":"user","name":"user"}]')
+    assert.equal(row.updated_at, 77)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test("main treats a legacy list as settled, and leaves the marker false for unreadable settings so the next start retries", () => {
+  const cases = [
+    [JSON.stringify({ [FLAT]: [entry("legacy")] }), true, "kept"],
+    ["{ malformed", false, "invalid"],
+    [JSON.stringify({ [FLAT]: null }), false, "invalid"],
+  ]
+  for (const [text, settled, status] of cases) {
+    const box = sandbox()
+    try {
+      createDatabase(box.db, { noSshRow: true })
+      writeSettings(box, text)
+      const loaded = loadPlugin({ electron: { app: { getPath: () => box.userData } } })
+      const { ctx, calls } = mainContext()
+      withHome(box.home, () => loaded.default.main(ctx))
+      assert.deepEqual(calls.set, settled ? [true] : [], text)
+      assert.equal(calls.logs[0].message, `cubeone-ssh-hosts: ${status}`)
+      assert.equal(readRows(box.db).some((row) => row.name === "plugin.ssh"), false)
+    } finally {
+      box.cleanup()
+    }
+  }
+})
+
+test("a database that vanishes between the check and the open is never created again", () => {
+  const box = sandbox()
+  try {
+    createDatabase(box.db, { sshValue: "[]" })
+    const result = plugin.seedServers({
+      userData: box.userData,
+      home: box.home,
+      hooks: { afterGuard: () => rmSync(box.db, { force: true }) },
+    })
+    assert.deepEqual(result, { status: "error" })
+    assert.equal(existsSync(box.db), false, "the database was created")
+    assert.deepEqual(readdirSync(box.userData), [])
+  } finally {
+    box.cleanup()
+  }
+})
+
+test("a missing file is not created by the write mode the plugin uses, and that mode still opens and writes an existing file", () => {
+  const box = sandbox()
+  try {
+    const missing = path.join(box.userData, "never-created.sqlite")
+    const location = pathToFileURL(missing)
+    location.search = "?mode=rw"
+    assert.throws(() => new DatabaseSync(location), /unable to open database file/)
+    assert.equal(existsSync(missing), false, "mode=rw created the file")
+    // The control that shows the URI is really interpreted: without it the same call creates the file.
+    const created = new DatabaseSync(pathToFileURL(missing))
+    created.close()
+    assert.equal(existsSync(missing), true)
+    rmSync(missing)
+    // And mode=rw writes an existing database.
+    createDatabase(box.db, { sshValue: "[]" })
+    const writable = pathToFileURL(box.db)
+    writable.search = "?mode=rw"
+    const db = new DatabaseSync(writable)
+    db.prepare("UPDATE state SET updated_at = 5 WHERE name = 'plugin.wsl'").run()
+    db.close()
+    assert.equal(readRows(box.db).find((row) => row.name === "plugin.wsl").updated_at, 5)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test("a database that is replaced by an empty file between the check and the open is not written to", () => {
+  const box = sandbox()
+  try {
+    createDatabase(box.db, { sshValue: "[]" })
+    const result = plugin.seedServers({
+      userData: box.userData,
+      home: box.home,
+      hooks: { afterGuard: () => writeFileSync(box.db, "") },
+    })
+    assert.deepEqual(result, { status: "schema" })
+    assert.equal(readFileSync(box.db).length, 0)
+  } finally {
+    box.cleanup()
+  }
+})
+
+test("every writable open in the plugin goes through the mode=rw URL, and there is no fallback to a plain path", () => {
+  const code = readFileSync(source, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+  const opens = [...code.matchAll(/new DatabaseSync\(([^)]*)\)/g)].map((match) => match[1])
+  assert.deepEqual(opens, ["location"])
+  assert.match(code, /location\.search = "\?mode=rw"/)
+  assert.match(code, /pathToFileURL\(file\)/)
+  assert.equal(/readOnly|mode=rwc|mode=memory|:memory:/.test(code), false)
+})
+
+test("databases in folders with spaces, a hash sign, a percent sign, a plus sign and non-ASCII letters are found and seeded", () => {
+  for (const folder of ["with space", "hash#sign", "percent%20sign", "plus+and&amp", "gr\u00F6\u00DFe \u00E4\u00F6"]) {
+    const box = sandbox()
+    try {
+      const userData = path.join(box.root, folder, "ai.opencode.desktop")
+      mkdirSync(userData, { recursive: true })
+      const db = path.join(userData, "drafts.sqlite")
+      createDatabase(db, { noSshRow: true })
+      assert.equal(plugin.seedServers({ userData, home: box.home }).status, "seeded", folder)
+      assert.equal(sshRow(readRows(db)).value, VALUE(ALIASES))
+      assert.deepEqual(readdirSync(userData).sort(), ["drafts.sqlite"])
+    } finally {
+      box.cleanup()
+    }
+  }
+})
+test("the served bundle loads the way the app loads it: Function wrapper, default export with a main setup only", () => {
+  const code = readFileSync(source, "utf8")
+  const shared = { effect: { Schema: { Boolean: "Schema.Boolean" } }, "@opencode/plugin/gui": { Plugin: { define: (definition) => definition } } }
+  const required = []
+  const nodeRequire = createRequire(import.meta.url)
+  const hostRequire = (request) => {
+    required.push(request)
+    if (shared[request]) return shared[request]
+    if (request === "electron" || request.startsWith("node:")) return nodeRequire(request)
+    throw new Error(`Plugin GUI bundle requires a module the app does not share: ${request}`)
+  }
+  const module = { exports: {} }
+  Function("require", "module", "exports", code)(hostRequire, module, module.exports)
+  const definition = Object.hasOwn(module.exports, "default") ? module.exports.default : module.exports
+  assert.deepEqual(Object.keys(definition).sort(), ["main"])
+  assert.equal(typeof definition.main, "function")
+  assert.deepEqual([...new Set(required)].sort(), ["@opencode/plugin/gui", "effect", "node:fs", "node:os", "node:path", "node:url"])
+})
 test("the bundle is GUI-only main code: a single CommonJS file that requires only shared modules and Node built-ins", () => {
   const text = readFileSync(source, "utf8")
   const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
   const required = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]).sort()
-  assert.deepEqual(required, ["@opencode/plugin/gui", "effect", "electron", "node:fs", "node:os", "node:path", "node:sqlite"])
+  assert.deepEqual(required, ["@opencode/plugin/gui", "effect", "electron", "node:fs", "node:os", "node:path", "node:sqlite", "node:url"])
   assert.equal(/require\("\.\.?\//.test(code), false, "the bundle requires a sibling file")
   assert.match(code, /exports\.default = Plugin\.define\(\{\s*main\(ctx\)/)
   assert.equal(/\bsetup\s*\(/.test(code), false, "there is no window part")
   // No process, network, ssh, key, registry, settings write, PATH lookup or other plugin's storage.
   assert.equal(/child_process|spawn|execFile|execSync|\bfetch\(|node:(http|https|net|tls)|WebContents|shell\./i.test(code), false)
   assert.equal(/writeFile|appendFile|rename|unlink|rmSync|mkdir|copyFile|createWriteStream|openSync/.test(code), false, "the plugin writes files")
-  assert.equal(/ssh\.exe|ssh-keygen|id_rsa|\.pem|OpenRouter|HKLM|reg\.exe|wsl|Principal|settings/i.test(code), false)
+  assert.equal(/ssh\.exe|ssh-keygen|id_rsa|\.pem|OpenRouter|HKLM|reg\.exe|wsl|Principal/i.test(code), false)
+  // The settings file is only ever read: its name appears next to a read, never next to a write.
+  assert.deepEqual([...code.matchAll(/opencode\.settings/g)].length, 1)
+  assert.match(code, /path\.join\(userData, "opencode\.settings"\)[\s\S]{0,200}fs\.lstatSync\(file\)/)
   assert.equal(/process\.env|which|where\.exe/.test(code), false, "no PATH or environment lookup")
   assert.equal(/CREATE |ALTER |DROP |PRAGMA (?!busy_timeout|table_info)|DELETE FROM|VACUUM/.test(code), false, "the plugin changes a schema or deletes rows")
   assert.deepEqual([...code.matchAll(/INSERT INTO (\w+)/g)].map((match) => match[1]), ["state"])

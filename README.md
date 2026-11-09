@@ -73,8 +73,21 @@ as the signed-in user, when the app starts. The app's built-in SSH plugin keeps 
 - writes them in one conditional statement inside one transaction, **only** if the row is missing or holds a valid
   empty JSON list (whitespace allowed). A list with entries, a JSON `null`, an object, malformed text or any other
   value is left exactly as it is, as is every other row.
-- never creates `drafts.sqlite` or any schema. If the file or its `state` table does not exist yet (first start of a
-  fresh install), it changes nothing and tries again at the next start.
+- while the row is missing, the app imports a list from the literal flat key `ssh.servers` of its `opencode.settings`
+  file (same data folder). A row written by the plugin would hide that list, so in that case the plugin reads the
+  file first (read only, never written): a list with entries there means nothing is written (and counts as settled).
+  A file or key it cannot understand (malformed JSON, not an object, the key is `null` or not a list, not a regular
+  file, over 1 MiB, unreadable) means nothing is written either; the flag stays unset. A missing file, no such key, or
+  an empty list there lets the seed go ahead. If the row already exists, it alone decides, because the app ignores
+  the settings file then. The check and the write happen under one `BEGIN IMMEDIATE` transaction.
+- never creates `drafts.sqlite` or any schema. The plugin only opens a file that already exists, with the SQLite URI
+  `file:…?mode=rw` ("read and write, do not create"). Node documents no such option for `DatabaseSync`, so this rests on
+  Node's source (`DatabaseSync::Open` always passes `SQLITE_OPEN_URI` to `sqlite3_open_v2`) and on a test of the real
+  runtime: on Desktop 2.2.6's Electron 44.9.1 (Node 24.22.0, SQLite 3.53.4) and on Node 26.13 a missing file stays
+  missing, the same call without `?mode=rw` creates it, and an existing file is opened and written. A runtime that
+  stopped honouring the URI would fail to open the file (an error), not create it, and there is no fallback to a plain
+  path. If the file or its `state` table does not exist yet (first start of a fresh install), nothing changes and the
+  next start tries again.
 - remembers success in its own flag (`plugin.cubeone-ssh-hosts` / `seeded`, written through the plugin storage). The
   flag is set after a successful seed or when the list already has entries, and never after "no alias", a missing
   database, a missing table, an unreadable or odd value, or an error. With the flag set it does nothing, so a list
@@ -83,15 +96,24 @@ as the signed-in user, when the app starts. The app's built-in SSH plugin keeps 
   config or personal id, and is not run by the installer or by SYSTEM, only by the Desktop app of the user.
 
 **When it shows.** The app reads the list once and caches it, so a list that was written during a start can first
-appear at the **next** start of the Desktop app, not necessarily in the window that is already open. A first launch
-right after installing is therefore not guaranteed to show the servers; the second start does. The plugin shows no
-notice. An existing list is never touched, so users who built their list keep it, and the full setup
-(`Install-OpenCodeRemote.ps1`) no longer writes a host list either (it used to replace the database list).
+appear at a **subsequent** start of the Desktop app, not necessarily in the window that is already open. A first launch
+right after installing is therefore not guaranteed to show the servers, and neither is the second one: nothing
+here is proven for a running Desktop yet. The plugin shows no notice. An existing list is never touched, so users who
+built their list keep it, and the full setup (`Install-OpenCodeRemote.ps1`) no longer writes a host list either (it
+used to replace the database list).
 
-Not tested against a running Desktop app: the tests below run the plugin against the app's table layout, with a stub
-of the plugin SDK. The bundle contract (one CommonJS file, only shared modules, a `main` setup) was checked against
-the loader of Desktop 2.2.6, but loading a GUI-only package without a server part, and the first-start timing, were
-not observed live.
+What was checked, and what was not:
+
+- Checked: the plugin against the app's table layout with a stub of the plugin SDK (see Tests). The loader code of
+  Desktop 2.2.6 was read: the bundle runs as `Function("require", "module", "exports", …)`, `exports.default` must be a
+  `Plugin.define` result with `setup` or `main`, `electron` and Node built-ins are real in the main process, and
+  `node:sqlite` is accepted.
+- Checked: a GUI-only package without a server part loads on the real Desktop 2.2.6 server. An isolated
+  `opencode-cli.exe serve` (own temporary profile, config and port, no managed service, no company configuration) listed
+  `cubeone-ssh-hosts` as an active local plugin with `features: { gui: true }` and served its bundle on
+  `/api/plugin/gui`.
+- Not checked: a running Desktop app executing `main`, whether the built-in SSH plugin has already read the list by
+  then, and how the app writes its own copy back after a connect or remove.
 
 Each user sets the personal cube one id (`CUBEONE_PRINCIPAL`) once, on every machine, as that user. No
 administrator rights are needed. The script ships in the package:
