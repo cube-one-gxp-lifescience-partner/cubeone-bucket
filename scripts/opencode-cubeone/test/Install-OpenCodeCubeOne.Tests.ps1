@@ -520,6 +520,150 @@ Invoke-Case 'rules: personal path rules (vorgaben) stay as before' {
     Assert-Equal ([System.IO.File]::ReadAllText((Join-Path $vorgaben 'extra.md'))) 'my extra path rule'
 }
 
+# ---------------------------------------------------------------------------------------------------------------
+# Remote setup identity: the profile user runs the script directly; every other identity is deferred.
+# The profile list, the identity and the registry key read are synthetic or recorded. The remote script is a
+# stub that only records its arguments. No ssh, wsl, key or scheduled task exists anywhere in these cases.
+# ---------------------------------------------------------------------------------------------------------------
+$realGetProfileListEntry = ${function:Get-ProfileListEntry}
+$sidUserA = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$sidUserB = 'S-1-5-21-111-222-333-1002'
+$sidEntra = 'S-1-12-1-111-222-333-444'
+$script:MockCurrentSid = $sidUserA
+$script:MockProfiles = @()
+$script:KeyReads = 0
+
+function Get-CurrentIdentitySid { return $script:MockCurrentSid }
+function Get-ProfileListEntry { return $script:MockProfiles }
+function Get-OpenRouterApiKey {
+    param([string]$Name)
+
+    $script:KeyReads++
+    throw 'the registry key must not be read in these cases'
+}
+
+function Reset-IdentityMocks {
+    param([string]$CurrentSid = $sidUserA)
+
+    $script:MockCurrentSid = $CurrentSid
+    $script:KeyReads = 0
+    $script:MockProfiles = @(
+        [pscustomobject]@{ Sid = 'S-1-5-18'; Path = 'C:\Windows\system32\config\systemprofile' },
+        [pscustomobject]@{ Sid = 'S-1-5-19'; Path = 'C:\Windows\ServiceProfiles\LocalService' },
+        [pscustomobject]@{ Sid = $sidUserA; Path = 'C:\Users\Anna' },
+        [pscustomobject]@{ Sid = $sidUserB; Path = 'C:\Users\Bernd' }
+    )
+}
+
+function New-RemoteScriptStub {
+    # Stands in for Install-OpenCodeRemote.ps1: it records that it ran and with which arguments. A fail.txt next
+    # to it makes it throw like the real script does when a target failed.
+    $directory = New-TempDir 'remote-stub'
+    $stub = Join-Path $directory 'Install-OpenCodeRemote.ps1'
+    $body = 'param([string]$SourceDir, [string]$ProfilePath)' + "`n" +
+        '[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot ''ran.txt''), "$SourceDir|$ProfilePath")' + "`n" +
+        'if (Test-Path -LiteralPath (Join-Path $PSScriptRoot ''fail.txt'')) { throw ''Remote OpenCode setup failed on 1 of 2 targets (1 succeeded, 0 skipped).'' }' + "`n"
+    Write-Utf8File $stub $body
+    return $stub
+}
+
+function Test-StubRan {
+    param([string]$Stub)
+
+    return Test-Path -LiteralPath (Join-Path (Split-Path -Parent $Stub) 'ran.txt')
+}
+
+Invoke-Case 'identity: the profile path resolves to exactly one user SID' {
+    Reset-IdentityMocks
+    Assert-Equal (Resolve-ProfileSid -ProfilePath 'C:\Users\Anna') $sidUserA
+    Assert-Equal (Resolve-ProfileSid -ProfilePath 'c:\users\ANNA\') $sidUserA 'case and trailing backslash matter'
+    $script:MockProfiles += [pscustomobject]@{ Sid = $sidEntra; Path = 'C:\Users\Entra User' }
+    Assert-Equal (Resolve-ProfileSid -ProfilePath 'C:\Users\Entra User') $sidEntra
+}
+
+Invoke-Case 'identity: SYSTEM, service, group, unknown and ambiguous profiles are refused' {
+    Reset-IdentityMocks
+    $script:MockProfiles += [pscustomobject]@{ Sid = ($sidUserB + '.bak'); Path = 'C:\Users\Backup' }
+    $script:MockProfiles += [pscustomobject]@{ Sid = 'S-1-5-32-545'; Path = 'C:\Users\Group' }
+    $script:MockProfiles += [pscustomobject]@{ Sid = $sidUserB; Path = 'C:\Users\Anna' }
+    foreach ($path in @('C:\Windows\system32\config\systemprofile', 'C:\Windows\ServiceProfiles\LocalService', 'C:\Users\Backup', 'C:\Users\Group', 'C:\Users\Nobody', 'C:\Users\Ann', 'C:\Users\Anna', 'C:\Users')) {
+        $refused = $false
+        try { Resolve-ProfileSid -ProfilePath $path | Out-Null } catch { $refused = $true }
+        Assert-True $refused "profile $path was accepted"
+    }
+}
+
+Invoke-Case 'identity: the real profile list is readable and holds only paths and SID names' {
+    $entries = @(& $realGetProfileListEntry)
+    Assert-True ($entries.Count -gt 0) 'no profile entries'
+    foreach ($entry in $entries) {
+        Assert-True ($entry.Sid -match '^S-1-') "unexpected key name $($entry.Sid)"
+        Assert-Equal @($entry.PSObject.Properties.Name).Count 2 'an entry carries more than SID and path'
+    }
+}
+
+Invoke-Case 'dispatch: the profile user runs the script directly with the exact paths' {
+    Reset-IdentityMocks
+    $stub = New-RemoteScriptStub
+    $result = Invoke-RemoteSetup -RemoteScript $stub -SourceDir 'C:\pkg' -ProfilePath 'C:\Users\Anna'
+    Assert-Equal $result.Status 'Done'
+    Assert-True (Test-StubRan $stub) 'remote script did not run'
+    Assert-Equal ([System.IO.File]::ReadAllText((Join-Path (Split-Path -Parent $stub) 'ran.txt'))) 'C:\pkg|C:\Users\Anna'
+    Assert-Equal $script:KeyReads 0 'the installer read the key'
+}
+
+Invoke-Case 'dispatch: a failing remote script (a target failed) is a failure, not Done' {
+    Reset-IdentityMocks
+    $stub = New-RemoteScriptStub
+    Write-Utf8File (Join-Path (Split-Path -Parent $stub) 'fail.txt') 'x'
+    $result = Invoke-RemoteSetup -RemoteScript $stub -SourceDir 'C:\pkg' -ProfilePath 'C:\Users\Anna'
+    Assert-Equal $result.Status 'Failed'
+    Assert-True ($result.Message -match 'failed on 1 of 2 targets') "failure message lost: $($result.Message)"
+}
+
+foreach ($identity in @(@('SYSTEM', 'S-1-5-18'), @('another account', $sidUserB))) {
+    Invoke-Case "dispatch ($($identity[0])): deferred with the exact command, nothing runs, nothing is read" {
+        Reset-IdentityMocks -CurrentSid $identity[1]
+        $stub = New-RemoteScriptStub
+        $source = Split-Path -Parent $stub
+        $result = Invoke-RemoteSetup -RemoteScript $stub -SourceDir $source -ProfilePath 'C:\Users\Anna'
+        Assert-Equal $result.Status 'Deferred'
+        Assert-True (-not (Test-StubRan $stub)) 'remote script ran in the wrong identity'
+        Assert-Equal $script:KeyReads 0 'the installer read the key'
+        Assert-True ($result.Message.Contains("-File `"$stub`" -SourceDir `"$source`" -ProfilePath `"C:\Users\Anna`"")) 'exact command missing'
+        Assert-True ($result.Message -match 'Nothing was read, connected or sent') 'deferral does not say that nothing happened'
+        Assert-True ($result.Message -match 'as the user who owns') 'target user missing'
+    }
+}
+
+Invoke-Case 'dispatch: a profile that belongs to no single user account is deferred, never run' {
+    Reset-IdentityMocks
+    $stub = New-RemoteScriptStub
+    foreach ($path in @('C:\Temp\nobody', 'C:\Windows\system32\config\systemprofile')) {
+        $result = Invoke-RemoteSetup -RemoteScript $stub -SourceDir (Split-Path -Parent $stub) -ProfilePath $path
+        Assert-Equal $result.Status 'Deferred'
+        Assert-True ($result.Message -match 'could not be matched') 'reason missing'
+    }
+    Assert-True (-not (Test-StubRan $stub)) 'remote script ran'
+}
+
+Invoke-Case 'caller: deferred, failed and done are reported differently, no text says configured' {
+    $text = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $InstallerPath).Path)
+    Assert-True ($text.Contains('Remote OpenCode setup deferred, not done')) 'deferral warning missing'
+    Assert-True ($text.Contains('Remote OpenCode setup failed')) 'failure warning missing'
+    Assert-True (-not $text.Contains('Remote OpenCode setup was skipped')) 'old generic warning remains'
+    Assert-True ($text -notmatch '(?i)remote[^\r\n]*configured') 'a message claims configured'
+}
+
+Invoke-Case 'no scheduled task, impersonation or credential code exists in the installer, the remote script or the key script' {
+    $directory = Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path
+    $forbidden = '(?i)Scheduled' + 'Task|schtasks|Start-Process[^\r\n]*-Credential|RunAs|LogonUser|Impersonat|-Password|HighestAvailable'
+    foreach ($name in @('Install-OpenCodeCubeOne.ps1', 'Install-OpenCodeRemote.ps1', 'Update-OpenCodeKey.ps1')) {
+        $text = [System.IO.File]::ReadAllText((Join-Path $directory $name))
+        Assert-True ($text -notmatch $forbidden) "$name contains cross-identity machinery"
+    }
+}
+
 Remove-Item -LiteralPath $script:TempRoot -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output "Passed: $script:Passed, failed: $script:Failed"
 if ($script:Failed -gt 0) {

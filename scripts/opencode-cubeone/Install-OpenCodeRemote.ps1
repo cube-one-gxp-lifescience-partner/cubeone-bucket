@@ -9,6 +9,10 @@
     ~/.config/opencode/openrouter.key (mode 0600). The key is never printed. Package and key travel through
     a private, randomly named 0700 directory under /tmp that is removed again on success, on failure and on abort;
     the key file is replaced atomically and never written to a fixed or world-readable path.
+
+    The script must run as the Windows user who owns -ProfilePath: ssh.exe authenticates with that user's
+    key and the key file ACL. A different identity (SYSTEM, another account) stops before anything is read,
+    connected or sent. Install-OpenCodeCubeOne.ps1 starts it as that user when it runs as SYSTEM.
 #>
 [CmdletBinding()]
 param(
@@ -25,6 +29,42 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Get-CurrentIdentitySid {
+    return [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+
+function Get-ProfileImagePath {
+    # Reads only the profile path of one SID below ProfileList. No other registry value is read.
+    param([string]$Sid)
+    if ($Sid -notmatch '^S-1-[0-9-]+$') { return '' }
+    $regBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $regSub = $regBase.OpenSubKey("SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$Sid")
+        if (-not $regSub) { return '' }
+        try {
+            return [string]$regSub.GetValue('ProfileImagePath')
+        } finally {
+            $regSub.Close()
+        }
+    } finally {
+        $regBase.Close()
+    }
+}
+
+function Assert-ProfileUserContext {
+    # ssh.exe, the key ACL and the user environment belong to the identity that runs this script. Setting HOME
+    # or USERPROFILE for a child process does not change that identity, so a profile of another account is refused.
+    param([string]$ProfilePath)
+    $stop = "Remote OpenCode setup must run as the Windows user who owns '$ProfilePath'. It was not started: nothing was read, connected or sent."
+    $currentSid = Get-CurrentIdentitySid
+    if ($currentSid -eq 'S-1-5-18' -or -not $ProfilePath) { throw $stop }
+    $imagePath = Get-ProfileImagePath -Sid $currentSid
+    if (-not $imagePath) { throw $stop }
+    $expected = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($imagePath)).TrimEnd('\')
+    $actual = [System.IO.Path]::GetFullPath($ProfilePath).TrimEnd('\')
+    if (-not [string]::Equals($expected, $actual, [System.StringComparison]::OrdinalIgnoreCase)) { throw $stop }
+}
 
 function Get-OpenRouterKey {
     # The key is deposited in the registry and is never printed.
@@ -216,12 +256,59 @@ function Send-File {
     return [pscustomobject]@{ Code = $process.ExitCode; Out = $stdout; Err = $stderr }
 }
 
+# Failures are reported as one fixed label, never as the raw stderr or stdout of ssh, wsl or the remote
+# script: that text is unbounded and can contain host details or, after a bad transfer, key material.
+# Transport = the connection or login failed, so nothing is known about the remote system.
+$failureClasses = @(
+    [pscustomobject]@{ Transport = $true; Label = 'host key verification failed'; Pattern = 'Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED' },
+    [pscustomobject]@{ Transport = $true; Label = 'private key file rejected'; Pattern = 'UNPROTECTED PRIVATE KEY|Bad owner or permissions|bad permissions|Load key|invalid format|no such identity' },
+    [pscustomobject]@{ Transport = $true; Label = 'authentication failed (public key denied)'; Pattern = 'Permission denied|Too many authentication failures|No supported authentication methods' },
+    [pscustomobject]@{ Transport = $true; Label = 'host not reachable'; Pattern = 'timed out|No route to host|Network is unreachable|Connection refused|Could not resolve hostname|Name or service not known|Connection closed|Connection reset|kex_exchange_identification' },
+    [pscustomobject]@{ Transport = $false; Label = 'invalid or foreign staging directory'; Pattern = 'invalid or foreign staging directory' },
+    [pscustomobject]@{ Transport = $false; Label = 'package transfer incomplete'; Pattern = 'package transfer incomplete' },
+    [pscustomobject]@{ Transport = $false; Label = 'key transfer incomplete'; Pattern = 'key transfer incomplete|key file missing|invalid expected key size' },
+    [pscustomobject]@{ Transport = $false; Label = 'key target is a directory'; Pattern = 'key target is a directory' },
+    [pscustomobject]@{ Transport = $false; Label = 'cannot write /etc/opencode (no sudo)'; Pattern = 'cannot write managed configuration' },
+    [pscustomobject]@{ Transport = $false; Label = 'sudo or opencode binary missing'; Pattern = 'sudo is required|opencode is not installed in' },
+    [pscustomobject]@{ Transport = $false; Label = 'CPU lacks instructions required by Bun'; Pattern = 'SSE4|[Ii]llegal instruction' }
+)
+$sshErrorClass = [pscustomobject]@{ Transport = $true; Label = 'ssh connection error'; Pattern = '' }
+$unclassifiedClass = [pscustomobject]@{ Transport = $false; Label = 'unclassified'; Pattern = '' }
+
+function Get-FailureClass {
+    param($Result)
+    $text = [string]$Result.Err + "`n" + [string]$Result.Out
+    if ($text.Length -gt 8000) { $text = $text.Substring(0, 8000) }
+    # ssh.exe itself exits with 255 when the connection or login failed. Any other exit code comes from the
+    # remote command, so transport patterns (for example "Permission denied" from a remote mkdir) do not apply.
+    $isTransport = $Result.Code -eq 255
+    foreach ($class in $failureClasses) {
+        if ($class.Transport -ne $isTransport) { continue }
+        if ($text -match $class.Pattern) { return $class }
+    }
+    if ($isTransport) { return $sshErrorClass }
+    return $unclassifiedClass
+}
+
+# Every target ends in exactly one of these. Skipped is a host the setup does not cover (Windows in the full
+# setup, a system that is neither Linux nor Windows). A host that could not be reached or logged in to is Failed.
+$tally = @{ Succeeded = 0; Skipped = 0; Failed = 0 }
+
+function Assert-RemoteRunSucceeded {
+    # A run that attempted targets and failed on any of them must not end like a success: the caller
+    # (Scoop installer) reports it, and Update-OpenCodeKey.ps1 exits non-zero.
+    param($Tally)
+    if ($Tally.Failed -gt 0) {
+        $attempted = $Tally.Succeeded + $Tally.Failed
+        throw "Remote OpenCode setup failed on $($Tally.Failed) of $attempted targets ($($Tally.Succeeded) succeeded, $($Tally.Skipped) skipped). The warnings above name each target and the reason."
+    }
+}
+
 function Invoke-Checked {
     param($Result, [string]$Action)
     if ($Result.Code -ne 0) {
-        $detail = ($Result.Err + $Result.Out).Trim()
-        if ($detail.Length -gt 400) { $detail = $detail.Substring(0, 400) }
-        throw "$Action failed (exit $($Result.Code)). $detail"
+        $class = Get-FailureClass -Result $Result
+        throw "$Action failed (exit $($Result.Code)): $($class.Label)."
     }
 }
 
@@ -327,6 +414,38 @@ function Remove-RemoteStage {
         $err = $_
         Write-Warning "Staging directory $StageDir on $($Target.Kind) $($Target.Name) was not removed: $($err.Exception.Message)"
     }
+}
+
+# Read-only OS probe for Windows OpenSSH hosts. It contains no key and runs with empty input.
+$windowsProbePs = "Write-Output ('cubeone-os=' + [System.Environment]::OSVersion.Platform)"
+$windowsProbeEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($windowsProbePs))
+
+function Get-SshHostOs {
+    <#
+    Finds out what a host is before anything but the probes is sent to it. Both probes read no stdin, so the
+    key is never sent to a host whose system is not known. A failed login or connection is not a statement
+    about the system: it returns Unknown with the failure label and no second probe is made.
+    Returns Os = Linux, Windows or Unknown, Failure = the label for Unknown, and Transport = true when the
+    connection or login failed (a failure of the target), false when the system simply is neither.
+    #>
+    param([string]$SshArguments, [string]$UserProfile)
+    $linux = Send-File -Exe 'ssh.exe' -Arguments "$SshArguments uname -s" -InputPath $nullInput -UserProfile $UserProfile
+    if ($linux.Code -eq 0 -and $linux.Out.Trim() -eq 'Linux') {
+        return [pscustomobject]@{ Os = 'Linux'; Failure = ''; Transport = $false }
+    }
+    $class = Get-FailureClass -Result $linux
+    if ($class.Transport) {
+        return [pscustomobject]@{ Os = 'Unknown'; Failure = $class.Label; Transport = $true }
+    }
+    $windows = Send-File -Exe 'ssh.exe' -Arguments "$SshArguments powershell.exe -NoProfile -NonInteractive -EncodedCommand $windowsProbeEncoded" -InputPath $nullInput -UserProfile $UserProfile
+    if ($windows.Code -eq 0 -and $windows.Out.Trim() -eq 'cubeone-os=Win32NT') {
+        return [pscustomobject]@{ Os = 'Windows'; Failure = ''; Transport = $false }
+    }
+    $class = Get-FailureClass -Result $windows
+    if ($class.Transport) {
+        return [pscustomobject]@{ Os = 'Unknown'; Failure = $class.Label; Transport = $true }
+    }
+    return [pscustomobject]@{ Os = 'Unknown'; Failure = 'system is neither Linux nor Windows'; Transport = $false }
 }
 
 # Remote side of the transfer. Package and key never land at a fixed path in /tmp. A stage step creates
@@ -767,7 +886,9 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
                         -ScriptPath $linuxScript -TrailingArguments @($keyBytes)
                     Invoke-Checked $recv "Key on WSL $distro"
                     Write-Host "WSL ${distro}: $($recv.Out.Trim())" -ForegroundColor Green
+                    $tally.Succeeded++
                 } catch {
+                    $tally.Failed++
                     Write-Warning "WSL ${distro}: $($_.Exception.Message)"
                 }
             }
@@ -780,29 +901,40 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
             $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
             $target = New-RemoteTarget -Kind 'ssh' -Name $sshHost -SshArguments $sshArgs -UserProfile $ProfilePath
             try {
-                # The probe reads no stdin, so it gets none: the key is not sent to a host before it is known to be Linux.
-                $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $nullInput -UserProfile $ProfilePath
-                if ($probe.Code -eq 0 -and $probe.Out.Trim() -eq 'Linux') {
+                # The probes read no stdin: the key is not sent to a host before its system is known. A failed
+                # Linux probe is no reason to try the Windows transfer; only a positive Windows answer is.
+                $hostOs = Get-SshHostOs -SshArguments $sshArgs -UserProfile $ProfilePath
+                if ($hostOs.Os -eq 'Linux') {
                     $recv = Invoke-StagedScript -Target $target -StageScriptPath $stageScript -Files $keyFiles `
                         -ScriptPath $linuxScript -TrailingArguments @($keyBytes)
                     Invoke-Checked $recv "Key on SSH $sshHost"
                     $line = $recv.Out.Trim()
                     if ($line -notmatch "bytes=$keyBytes(\s|$)") {
-                        Write-Warning "SSH ${sshHost}: $line (expected $keyBytes bytes)"
+                        $tally.Failed++
+                        Write-Warning "SSH ${sshHost}: key check failed, expected $keyBytes bytes."
                     } else {
+                        $tally.Succeeded++
                         Write-Host "SSH ${sshHost}: $line" -ForegroundColor Green
                     }
+                    continue
+                }
+                if ($hostOs.Os -ne 'Windows') {
+                    if ($hostOs.Transport) { $tally.Failed++ } else { $tally.Skipped++ }
+                    Write-Warning "SSH ${sshHost}: key not sent, $($hostOs.Failure)."
                     continue
                 }
                 $recv = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs powershell.exe -NoProfile -EncodedCommand $encoded" -InputPath $keyFile -UserProfile $ProfilePath
                 Invoke-Checked $recv "Key on SSH $sshHost"
                 $line = $recv.Out.Trim()
                 if ($line -notmatch "bytes=$expected(\s|$)") {
-                    Write-Warning "SSH ${sshHost}: $line (expected $expected bytes)"
+                    $tally.Failed++
+                    Write-Warning "SSH ${sshHost}: key check failed, expected $expected bytes."
                 } else {
+                    $tally.Succeeded++
                     Write-Host "SSH ${sshHost}: $line" -ForegroundColor Green
                 }
             } catch {
+                $tally.Failed++
                 Write-Warning "SSH ${sshHost}: $($_.Exception.Message)"
             }
         }
@@ -810,6 +942,9 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
         Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+# First action of the run: nothing below (registry key, ssh, wsl, SSH config) runs under another identity.
+Assert-ProfileUserContext -ProfilePath $ProfilePath
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-remote-' + [guid]::NewGuid().ToString('N'))
@@ -824,6 +959,7 @@ New-Item -ItemType Directory -Path $payload -Force | Out-Null
 try {
     if ($KeyOnly) {
         Update-OpenRouterKeyOnTargets
+        Assert-RemoteRunSucceeded -Tally $tally
         return
     }
     # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
@@ -870,7 +1006,9 @@ try {
             Invoke-Checked $recv "Install on WSL $distro"
             Write-Host "WSL ${distro}: $($recv.Out.Trim())" -ForegroundColor Green
             $ok++
+            $tally.Succeeded++
         } catch {
+            $tally.Failed++
             Write-Warning "WSL ${distro}: $($_.Exception.Message)"
         }
     }
@@ -895,10 +1033,16 @@ try {
         $sshArgs = "-F `"$sshConfig`" -o BatchMode=yes -o ConnectTimeout=12 $sshHost"
         $target = New-RemoteTarget -Kind 'ssh' -Name $sshHost -SshArguments $sshArgs -UserProfile $ProfilePath
         try {
-            # uname reads no stdin, so the probe gets none: the key never goes to a host that is not known to be Linux.
-            $probe = Send-File -Exe 'ssh.exe' -Arguments "$sshArgs uname -s" -InputPath $nullInput -UserProfile $ProfilePath
-            if ($probe.Code -ne 0 -or $probe.Out.Trim() -ne 'Linux') {
-                Write-Warning "SSH ${sshHost}: skipped, not a reachable Linux host."
+            # The probes read no stdin, so the package and the key never go to a host that is not known to be Linux.
+            $hostOs = Get-SshHostOs -SshArguments $sshArgs -UserProfile $ProfilePath
+            if ($hostOs.Os -eq 'Windows') {
+                $tally.Skipped++
+                Write-Warning "SSH ${sshHost}: skipped, Windows hosts are not supported by the full setup. Only the key is updated there (Update-OpenCodeKey.ps1)."
+                continue
+            }
+            if ($hostOs.Os -ne 'Linux') {
+                if ($hostOs.Transport) { $tally.Failed++ } else { $tally.Skipped++ }
+                Write-Warning "SSH ${sshHost}: not set up, $($hostOs.Failure)."
                 continue
             }
             # The desktop app runs the remote server as a plain `ssh host opencode ...`, so the CLI has
@@ -915,11 +1059,14 @@ try {
                 -ScriptPath $scriptFile -LeadingArguments @('-') -TrailingArguments @($keyBytes, $tgzBytes)
             Invoke-Checked $recv "Install on SSH $sshHost"
             Write-Host "SSH ${sshHost}: $($recv.Out.Trim())" -ForegroundColor Green
+            $tally.Succeeded++
         } catch {
+            $tally.Failed++
             Write-Warning "SSH ${sshHost}: $($_.Exception.Message)"
         }
     }
     }
+    Assert-RemoteRunSucceeded -Tally $tally
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }

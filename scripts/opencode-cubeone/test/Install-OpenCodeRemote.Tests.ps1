@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Pester tests for the key and package transfer in Install-OpenCodeRemote.ps1.
 
@@ -21,11 +21,13 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
         $functionNames = @(
             'Send-File', 'Invoke-Checked', 'New-RemoteTarget', 'Invoke-RemoteCommand', 'Invoke-RemoteScript',
-            'New-RemoteStage', 'Send-RemoteStageFile', 'Invoke-StagedScript', 'Remove-RemoteStage'
+            'New-RemoteStage', 'Send-RemoteStageFile', 'Invoke-StagedScript', 'Remove-RemoteStage',
+            'Get-CurrentIdentitySid', 'Get-ProfileImagePath', 'Assert-ProfileUserContext', 'Get-FailureClass', 'Get-SshHostOs', 'Assert-RemoteRunSucceeded'
         )
         $variableNames = @(
             'nullInput', 'stageDirPattern', 'stageCommandPattern', 'scriptArgPattern',
-            'stageSh', 'commonSh', 'installBodySh', 'installSh', 'linuxSh'
+            'stageSh', 'commonSh', 'installBodySh', 'installSh', 'linuxSh',
+            'failureClasses', 'sshErrorClass', 'unclassifiedClass', 'windowsProbePs', 'windowsProbeEncoded'
         )
         $functionAsts = @($ast.FindAll({
             param($node)
@@ -67,6 +69,12 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
         # A non-login bash needs the Git coreutils (mktemp, stat, tar) on PATH. Restored in AfterAll.
         $originalPath = $env:PATH
         if ($haveBash) { $env:PATH = (Split-Path -Parent $bashExe) + ';' + $env:PATH }
+
+        function Get-ThrownMessage {
+            param([scriptblock]$Body)
+            try { & $Body } catch { return $_.Exception.Message }
+            return ''
+        }
 
         function Write-LfFile {
             param([string]$Path, [string]$Text)
@@ -118,10 +126,43 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             $text -match 'cat > /tmp/cubeone-[a-z]+\.' | Should Be $false
         }
 
-        It 'never sends the key to the uname probe' {
+        It 'never sends the key to a probe, and only a positive Windows answer reaches the Windows key transfer' {
             $text = [System.IO.File]::ReadAllText($scriptPath)
             $text -match 'uname -s" -InputPath \$keyFile' | Should Be $false
-            ([regex]::Matches($text, 'uname -s" -InputPath \$nullInput')).Count | Should Be 2
+            ([regex]::Matches($text, 'uname -s" -InputPath \$nullInput')).Count | Should Be 1
+            ([regex]::Matches($text, 'uname -s')).Count | Should Be 1
+            ([regex]::Matches($text, 'Get-SshHostOs -SshArguments')).Count | Should Be 2
+            $keySend = $text.IndexOf('-InputPath $keyFile -UserProfile $ProfilePath')
+            $gate = $text.IndexOf("if (`$hostOs.Os -ne 'Windows')")
+            $keySend | Should BeGreaterThan 0
+            $gate | Should BeGreaterThan 0
+            ($gate -lt $keySend) | Should Be $true
+            ([regex]::Matches($text, '-InputPath \$keyFile -UserProfile \$ProfilePath')).Count | Should Be 1
+        }
+
+        It 'checks the user context before it reads the key, starts ssh or touches the profile' {
+            $text = [System.IO.File]::ReadAllText($scriptPath)
+            $guard = $text.IndexOf('Assert-ProfileUserContext -ProfilePath $ProfilePath')
+            $guard | Should BeGreaterThan 0
+            foreach ($later in @('if ($KeyOnly)', 'Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath', 'New-LinuxPayload -Source $SourceDir', '$key = Get-OpenRouterKey')) {
+                $at = $text.LastIndexOf($later)
+                $at | Should BeGreaterThan 0
+                ($guard -lt $at) | Should Be $true
+            }
+        }
+
+        It 'stops with the guard message when a child process runs it for a profile of another account (no key read, no ssh)' {
+            $other = Join-Path ([System.IO.Path]::GetTempPath()) ('other-profile-' + [guid]::NewGuid().ToString('N'))
+            foreach ($shell in @((Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'), (Get-Command pwsh -ErrorAction SilentlyContinue).Source)) {
+                if (-not $shell) { continue }
+                # The message is printed by the child itself: a wrapped error record would split it across lines.
+                $childCode = 'try { & ''' + $scriptPath.Replace("'", "''") + ''' -ProfilePath ''' + $other.Replace("'", "''") + ''' -DesktopOnly -SkipWsl -SkipSsh } catch { [Console]::Out.Write($_.Exception.Message); exit 3 }'
+                $encodedChild = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($childCode))
+                $out = & $shell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedChild | Out-String
+                $LASTEXITCODE | Should Be 3
+                $out | Should Match 'must run as the Windows user'
+                $out | Should Match 'nothing was read, connected or sent'
+            }
         }
 
         It 'composes the remote scripts with LF only and valid bash syntax' -Skip:(-not $haveBash) {
@@ -133,6 +174,316 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
                 $result.Code | Should Be 0
                 $result.Err | Should Be ''
             }
+        }
+    }
+
+    Context 'User context guard' {
+        It 'accepts the profile of the identity that runs the script (real identity and real profile list, read only)' {
+            $own = [System.IO.Path]::GetFullPath($env:USERPROFILE)
+            { Assert-ProfileUserContext -ProfilePath $own } | Should Not Throw
+            { Assert-ProfileUserContext -ProfilePath ($own.ToUpperInvariant() + '\') } | Should Not Throw
+        }
+
+        It 'refuses SYSTEM, a profile of another account, an unknown profile and an empty path' {
+            $global:TestCalls.Clear()
+            $global:TestBehavior = { New-Result }
+            function Get-CurrentIdentitySid { return 'S-1-5-21-1-2-3-1001' }
+            function Get-ProfileImagePath { param([string]$Sid) if ($Sid -eq 'S-1-5-21-1-2-3-1001') { return 'C:\Users\Anna' } return '' }
+            { Assert-ProfileUserContext -ProfilePath 'C:\Users\Anna' } | Should Not Throw
+            { Assert-ProfileUserContext -ProfilePath 'c:\users\anna\' } | Should Not Throw
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath 'C:\Users\Bernd' }) | Should Match 'must run as the Windows user'
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath 'C:\Users\Ann' }) | Should Match 'must run as the Windows user'
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath '' }) | Should Match 'must run as the Windows user'
+            function Get-CurrentIdentitySid { return 'S-1-5-18' }
+            function Get-ProfileImagePath { param([string]$Sid) return 'C:\Windows\system32\config\systemprofile' }
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath 'C:\Windows\system32\config\systemprofile' }) | Should Match 'nothing was read, connected or sent'
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath 'C:\Users\Anna' }) | Should Match 'must run as the Windows user'
+            function Get-CurrentIdentitySid { return 'S-1-5-21-1-2-3-1002' }
+            (Get-ThrownMessage { Assert-ProfileUserContext -ProfilePath 'C:\Users\Anna' }) | Should Match 'must run as the Windows user'
+            $global:TestCalls.Count | Should Be 0
+        }
+
+        It 'expands environment variables in the registered profile path' {
+            function Get-CurrentIdentitySid { return 'S-1-5-21-1-2-3-1001' }
+            function Get-ProfileImagePath { param([string]$Sid) return '%SystemDrive%\Users\Anna' }
+            { Assert-ProfileUserContext -ProfilePath ($env:SystemDrive + '\Users\Anna') } | Should Not Throw
+        }
+
+        It 'reads no registry path from a SID that is not a SID' {
+            Get-ProfileImagePath -Sid 'S-1-5-21-1\..\..\x' | Should Be ''
+            Get-ProfileImagePath -Sid '' | Should Be ''
+        }
+    }
+
+    Context 'Failure classification' {
+        It 'maps ssh and script failures to one fixed label' {
+            $cases = @(
+                @{ Code = 255; Err = 'x@h: Permission denied (publickey,password).'; Label = 'authentication failed (public key denied)' },
+                @{ Code = 255; Err = 'Host key verification failed.'; Label = 'host key verification failed' },
+                @{ Code = 255; Err = 'ssh: connect to host h port 22: Connection timed out'; Label = 'host not reachable' },
+                @{ Code = 255; Err = 'ssh: Could not resolve hostname h'; Label = 'host not reachable' },
+                @{ Code = 255; Err = 'Load key "C:\\u\\.ssh\\id": invalid format'; Label = 'private key file rejected' },
+                @{ Code = 255; Err = 'something new'; Label = 'ssh connection error' },
+                @{ Code = 255; Err = ''; Label = 'ssh connection error' },
+                @{ Code = 1; Err = 'package transfer incomplete'; Label = 'package transfer incomplete' },
+                @{ Code = 1; Err = 'key transfer incomplete'; Label = 'key transfer incomplete' },
+                @{ Code = 1; Err = 'invalid or foreign staging directory'; Label = 'invalid or foreign staging directory' },
+                @{ Code = 1; Err = 'cannot write managed configuration to /etc/opencode; personal configuration was not changed'; Label = 'cannot write /etc/opencode (no sudo)' },
+                @{ Code = 1; Err = 'mkdir: cannot create directory: Permission denied'; Label = 'unclassified' },
+                @{ Code = 1; Err = 'Connection timed out while downloading'; Label = 'unclassified' },
+                @{ Code = 1; Err = ''; Label = 'unclassified' }
+            )
+            foreach ($case in $cases) {
+                (Get-FailureClass -Result (New-Result -Code $case.Code -Err $case.Err)).Label | Should Be $case.Label
+            }
+            (Get-FailureClass -Result (New-Result -Code 1 -Out 'key transfer incomplete')).Label | Should Be 'key transfer incomplete'
+        }
+
+        It 'reports the exit code and the label only, never the raw output, and stays bounded' {
+            $secret = $syntheticKey + ' /home/someone/.config/opencode/openrouter.key host-detail-9'
+            $long = ('x' * 100000) + $secret
+            foreach ($result in @((New-Result -Code 255 -Err $secret), (New-Result -Code 1 -Err $secret -Out $long), (New-Result -Code 2 -Out $long))) {
+                $message = ''
+                try { Invoke-Checked $result 'Install on SSH h' } catch { $message = $_.Exception.Message }
+                $message | Should Match '^Install on SSH h failed \(exit \d+\): [^:]+\.$'
+                $message.Contains($syntheticKey) | Should Be $false
+                $message.Contains('host-detail') | Should Be $false
+                ($message.Length -lt 200) | Should Be $true
+            }
+            { Invoke-Checked (New-Result -Code 0 -Err 'noise') 'x' } | Should Not Throw
+        }
+    }
+
+    Context 'Host system probe' {
+        BeforeEach {
+            $global:TestCalls.Clear()
+        }
+
+        It 'answers Linux after one probe without input' {
+            $global:TestBehavior = { New-Result -Out "Linux`n" }
+            $os = Get-SshHostOs -SshArguments '-F x h' -UserProfile 'C:\u'
+            $os.Os | Should Be 'Linux'
+            $global:TestCalls.Count | Should Be 1
+            $global:TestCalls[0].Arguments | Should Be '-F x h uname -s'
+            $global:TestCalls[0].InputPath | Should Be 'NUL'
+        }
+
+        It 'does not assume an operating system after a failed login, and sends nothing else' {
+            foreach ($err in @('x@h: Permission denied (publickey).', 'Host key verification failed.', 'ssh: connect to host h port 22: Connection refused', '')) {
+                $global:TestCalls.Clear()
+                $failed = New-Result -Code 255 -Err $err
+                $global:TestBehavior = { param($c) return $failed }.GetNewClosure()
+                $os = Get-SshHostOs -SshArguments '-F x h' -UserProfile 'C:\u'
+                $os.Os | Should Be 'Unknown'
+                $os.Failure | Should Not BeNullOrEmpty
+                $global:TestCalls.Count | Should Be 1
+            }
+        }
+
+        It 'recognises Windows by a read-only PowerShell probe that carries no key and no input' {
+            $global:TestBehavior = {
+                param($c)
+                if ($c.Arguments -like '*uname -s') { return New-Result -Code 1 -Err "'uname' is not recognized as an internal or external command" }
+                return New-Result -Out "cubeone-os=Win32NT`r`n"
+            }
+            $os = Get-SshHostOs -SshArguments '-F x h' -UserProfile 'C:\u'
+            $os.Os | Should Be 'Windows'
+            $global:TestCalls.Count | Should Be 2
+            foreach ($call in $global:TestCalls) { $call.InputPath | Should Be 'NUL' }
+            $encoded = ($global:TestCalls[1].Arguments -split ' ')[-1]
+            $global:TestCalls[1].Arguments | Should Match 'powershell\.exe -NoProfile -NonInteractive -EncodedCommand '
+            $decoded = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+            $decoded | Should Be $windowsProbePs
+            $decoded | Should Match 'OSVersion\.Platform'
+            $decoded | Should Not Match 'Set-|Remove-|Out-File|Environment\]::Set|Registry|ReadToEnd'
+        }
+
+        It 'does not treat a Linux host with a failing uname, or another system, as Windows' {
+            foreach ($first in @((New-Result -Code 127 -Err 'uname: not found'), (New-Result -Out "Darwin`n"))) {
+                $global:TestCalls.Clear()
+                $second = New-Result -Code 127 -Err 'powershell.exe: command not found'
+                $global:TestBehavior = {
+                    param($c)
+                    if ($c.Arguments -like '*uname -s') { return $first }
+                    return $second
+                }.GetNewClosure()
+                $os = Get-SshHostOs -SshArguments '-F x h' -UserProfile 'C:\u'
+                $os.Os | Should Be 'Unknown'
+                $os.Failure | Should Be 'system is neither Linux nor Windows'
+            }
+        }
+
+        It 'stops at a transport error of the second probe' {
+            $global:TestBehavior = {
+                param($c)
+                if ($c.Arguments -like '*uname -s') { return New-Result -Code 1 -Err 'not recognized' }
+                return New-Result -Code 255 -Err 'Connection reset by peer'
+            }
+            $os = Get-SshHostOs -SshArguments '-F x h' -UserProfile 'C:\u'
+            $os.Os | Should Be 'Unknown'
+            $os.Failure | Should Be 'host not reachable'
+        }
+    }
+
+    Context 'Run result (counts, exit)' {
+        It 'does not throw when nothing was attempted, everything worked, or only unsupported hosts were skipped' {
+            { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 0; Skipped = 0; Failed = 0 } } | Should Not Throw
+            { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 3; Skipped = 0; Failed = 0 } } | Should Not Throw
+            { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 0; Skipped = 2; Failed = 0 } } | Should Not Throw
+            { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 2; Skipped = 1; Failed = 0 } } | Should Not Throw
+        }
+
+        It 'throws with the counts when every attempted target failed, and when only some did' {
+            (Get-ThrownMessage { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 0; Skipped = 0; Failed = 2 } }) | Should Be 'Remote OpenCode setup failed on 2 of 2 targets (0 succeeded, 0 skipped). The warnings above name each target and the reason.'
+            (Get-ThrownMessage { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 5; Skipped = 1; Failed = 1 } }) | Should Match 'failed on 1 of 6 targets \(5 succeeded, 1 skipped\)'
+            (Get-ThrownMessage { Assert-RemoteRunSucceeded -Tally @{ Succeeded = 0; Skipped = 3; Failed = 1 } }) | Should Match 'failed on 1 of 1 targets'
+        }
+    }
+
+    Context 'Whole run with a mocked transport (no ssh, no wsl, no registry key, synthetic profile)' {
+        BeforeAll {
+            # The script itself runs in-process. Only the four things that reach outside are replaced: the identity
+            # guard (tested above), Send-File (the mock), the registry key read and the WSL list.
+            $remoteAst = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$null, [ref]$null)
+            $remoteText = [System.IO.File]::ReadAllText($scriptPath)
+            $stubs = @{
+                'Send-File'         = 'function Send-File { param([string]$Exe, [string]$Arguments, [string]$InputPath, [string]$UserProfile) throw ''replaced'' }'
+                'Get-OpenRouterKey' = "function Get-OpenRouterKey { return '$syntheticKey' }"
+                'Get-WslDistros'    = 'function Get-WslDistros { return @() }'
+            }
+            $edits = @()
+            foreach ($name in $stubs.Keys) {
+                $definition = $remoteAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+                $edits += [pscustomobject]@{ Start = $definition.Extent.StartOffset; End = $definition.Extent.EndOffset; Text = $(if ($name -eq 'Send-File') { '' } else { $stubs[$name] }) }
+            }
+            $guard = $remoteAst.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Assert-ProfileUserContext' }, $true)
+            $edits += [pscustomobject]@{ Start = $guard.Extent.StartOffset; End = $guard.Extent.EndOffset; Text = '' }
+            foreach ($edit in ($edits | Sort-Object Start -Descending)) {
+                $remoteText = $remoteText.Substring(0, $edit.Start) + $edit.Text + $remoteText.Substring($edit.End)
+            }
+            $modifiedScript = Join-Path $sandbox 'Install-OpenCodeRemote.modified.ps1'
+            [System.IO.File]::WriteAllText($modifiedScript, $remoteText, $utf8)
+            # A copy of the package without node_modules and tests keeps the payload (copy and tar) small.
+            $packageRoot = Join-Path $sandbox 'package'
+            & robocopy.exe (Split-Path -Parent $PSScriptRoot) $packageRoot /E /XD node_modules test /NFL /NDL /NJH /NJS /NP | Out-Null
+
+            $global:HostModes = @{}
+            $global:TestBehavior = {
+                param($c)
+                $hostName = ''
+                if ($c.Arguments -match 'ConnectTimeout=12 (\S+)') { $hostName = $Matches[1] }
+                $mode = $global:HostModes[$hostName]
+                $keyLength = $syntheticKey.Length
+                if ($c.Arguments -like '*uname -s') {
+                    if ($mode -like 'linux*') { return New-Result -Out "Linux`n" }
+                    if ($mode -eq 'denied') { return New-Result -Code 255 -Err 'u@h: Permission denied (publickey).' }
+                    if ($mode -eq 'down') { return New-Result -Code 255 -Err 'ssh: connect to host h port 22: Connection timed out' }
+                    return New-Result -Code 1 -Err "'uname' is not recognized as an internal or external command"
+                }
+                if ($c.Arguments -like '*powershell.exe*EncodedCommand*') {
+                    if ($c.InputPath -eq 'NUL') {
+                        if ($mode -like 'windows*') { return New-Result -Out "cubeone-os=Win32NT`r`n" }
+                        return New-Result -Code 127 -Err 'powershell.exe: command not found'
+                    }
+                    if ($mode -eq 'windows-badkey') { return New-Result -Out 'bytes=1 hklm=skipped' }
+                    return New-Result -Out "bytes=$keyLength hklm=skipped"
+                }
+                if ($c.InputPath -like '*stage.sh') { return New-Result -Out '/tmp/cubeone-AAAAAAAAAA' }
+                if ($c.InputPath -like '*install-key.sh') {
+                    if ($mode -eq 'linux-badkey') { return New-Result -Out 'bytes=1 referenced=no' }
+                    return New-Result -Out "bytes=$keyLength referenced=no"
+                }
+                if ($mode -eq 'linux-installfail' -and $c.InputPath -like '*install.sh') { return New-Result -Code 1 -Err 'package transfer incomplete' }
+                return New-Result -Out 'installed'
+            }
+        }
+
+        AfterAll {
+            Remove-Variable -Name HostModes -Scope Global -ErrorAction SilentlyContinue
+        }
+
+        function Invoke-WholeRun {
+            param([hashtable]$Modes, [switch]$KeyOnly)
+            $profileDir = Join-Path $sandbox ('profile-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path (Join-Path $profileDir '.ssh') -Force | Out-Null
+            $lines = @('Host *', '    SetEnv CUBEONE_PRINCIPAL=SYNTHETICPRINCIPAL0123456789')
+            foreach ($name in $Modes.Keys) { $lines += "Host $name" }
+            [System.IO.File]::WriteAllText((Join-Path $profileDir '.ssh\config'), ($lines -join "`r`n"), $utf8)
+            $global:HostModes = $Modes
+            $global:TestCalls.Clear()
+            $params = @{ SourceDir = $packageRoot; ProfilePath = $profileDir; SkipWsl = $true }
+            if ($KeyOnly) { $params['KeyOnly'] = $true }
+            # Git's GNU tar (first on PATH for the bash cases) cannot read drive paths; the script needs Windows tar.
+            $savedPath = $env:PATH
+            $env:PATH = (Join-Path $env:windir 'System32') + ';' + $env:PATH
+            try {
+                $message = Get-ThrownMessage { & $modifiedScript @params 3>$null 6>$null | Out-Null }
+            } finally {
+                $env:PATH = $savedPath
+            }
+            return $message
+        }
+
+        function Get-KeyCalls {
+            return @($global:TestCalls | Where-Object { $_.InputPath -like '*openrouter.key' -or $_.InputPath -like '*cubeone-opencode.tgz' })
+        }
+
+        It 'key update: all targets good ends without an error' {
+            (Invoke-WholeRun -KeyOnly @{ a = 'linux'; b = 'linux' }) | Should Be ''
+        }
+
+        It 'key update: all attempted targets failing ends with an error, and no key was sent to a host that refused the login' {
+            (Invoke-WholeRun -KeyOnly @{ a = 'denied'; b = 'down' }) | Should Match 'failed on 2 of 2 targets \(0 succeeded, 0 skipped\)'
+            @(Get-KeyCalls).Count | Should Be 0
+        }
+
+        It 'key update: a mix of good and failing targets ends with an error naming the counts' {
+            (Invoke-WholeRun -KeyOnly @{ a = 'linux'; b = 'denied'; c = 'linux-badkey' }) | Should Match 'failed on 2 of 3 targets \(1 succeeded, 0 skipped\)'
+        }
+
+        It 'key update: a Windows host gets the key only after the read-only probe, and a wrong byte count is a failure' {
+            (Invoke-WholeRun -KeyOnly @{ w = 'windows' }) | Should Be ''
+            $keyCalls = @(Get-KeyCalls)
+            $keyCalls.Count | Should Be 1
+            $keyCalls[0].Arguments | Should Match 'powershell\.exe -NoProfile -EncodedCommand '
+            $probeAt = 0
+            for ($i = 0; $i -lt $global:TestCalls.Count; $i++) { if ($global:TestCalls[$i].Arguments -like '*EncodedCommand*' -and $global:TestCalls[$i].InputPath -eq 'NUL') { $probeAt = $i } }
+            $keyAt = [array]::IndexOf(@($global:TestCalls), $keyCalls[0])
+            ($probeAt -gt 0 -and $keyAt -gt $probeAt) | Should Be $true
+            (Invoke-WholeRun -KeyOnly @{ w = 'windows-badkey' }) | Should Match 'failed on 1 of 1 targets'
+        }
+
+        It 'key update: a system that is neither Linux nor Windows is skipped, not failed, and gets no key' {
+            (Invoke-WholeRun -KeyOnly @{ x = 'other' }) | Should Be ''
+            @(Get-KeyCalls).Count | Should Be 0
+        }
+
+        It 'key update: an unreachable host is a failure, not a non-Linux host' {
+            (Invoke-WholeRun -KeyOnly @{ a = 'down' }) | Should Match 'failed on 1 of 1 targets'
+            @($global:TestCalls | Where-Object { $_.Arguments -like '*EncodedCommand*' }).Count | Should Be 0
+        }
+
+        It 'key update: no hosts at all is not a failure' {
+            (Invoke-WholeRun -KeyOnly @{}) | Should Be ''
+        }
+
+        It 'full setup: Windows hosts are skipped as unsupported without error, and nothing but probes reaches them' {
+            (Invoke-WholeRun @{ w1 = 'windows'; w2 = 'windows' }) | Should Be ''
+            @($global:TestCalls | Where-Object { $_.InputPath -ne 'NUL' }).Count | Should Be 0
+        }
+
+        It 'full setup: Windows next to a failing Linux host still ends with an error, and the failure is counted once' {
+            (Invoke-WholeRun @{ w = 'windows'; l = 'linux-installfail' }) | Should Match 'failed on 1 of 1 targets \(0 succeeded, 1 skipped\)'
+        }
+
+        It 'full setup: all good, and a failing install on one of two hosts, end as expected' {
+            (Invoke-WholeRun @{ a = 'linux'; b = 'linux' }) | Should Be ''
+            $message = Invoke-WholeRun @{ a = 'linux'; b = 'linux-installfail' }
+            $message | Should Match 'failed on 1 of 2 targets \(1 succeeded, 0 skipped\)'
+            $message.Contains($syntheticKey) | Should Be $false
+            $message | Should Not Match 'package transfer incomplete'
+            (Invoke-WholeRun @{ a = 'denied'; b = 'down' }) | Should Match 'failed on 2 of 2 targets'
+            @(Get-KeyCalls).Count | Should Be 0
         }
     }
 

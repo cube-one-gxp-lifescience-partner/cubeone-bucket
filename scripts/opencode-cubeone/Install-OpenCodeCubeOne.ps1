@@ -26,6 +26,9 @@ $SidSystem = 'S-1-5-18'
 $SidAdministrators = 'S-1-5-32-544'
 $SidUsers = 'S-1-5-32-545'
 $SidOwnerRights = 'S-1-3-4'
+# A person's account: a local or domain account (S-1-5-21-...) or an Entra ID account (S-1-12-1-...).
+# Not SYSTEM, a service, or a group.
+$SidUserPattern = '^S-1-(5-21|12-1)(-\d{1,10}){4}$'
 
 function Get-OpenRouterApiKey {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -470,6 +473,94 @@ function Install-UserConfiguration {
     }
 }
 
+function Get-CurrentIdentitySid {
+    return [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+
+function Get-ProfileListEntry {
+    # Reads only the SID names and the ProfileImagePath of each profile below ProfileList. No other value.
+    $regBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $list = $regBase.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList')
+        if (-not $list) { return }
+        try {
+            foreach ($name in $list.GetSubKeyNames()) {
+                $entry = $list.OpenSubKey($name)
+                if (-not $entry) { continue }
+                try {
+                    $path = [string]$entry.GetValue('ProfileImagePath')
+                } finally {
+                    $entry.Close()
+                }
+                if ($path) { [pscustomobject]@{ Sid = $name; Path = $path } }
+            }
+        } finally {
+            $list.Close()
+        }
+    } finally {
+        $regBase.Close()
+    }
+}
+
+function Resolve-ProfileSid {
+    # The SID of the one person's account whose profile directory is ProfilePath. Anything else is an error:
+    # a path that is no profile, a SYSTEM or service profile, or a path that two accounts claim.
+    param([Parameter(Mandatory = $true)][string]$ProfilePath)
+
+    $wanted = [System.IO.Path]::GetFullPath($ProfilePath).TrimEnd('\')
+    $found = @()
+    foreach ($entry in @(Get-ProfileListEntry)) {
+        if ($entry.Sid -notmatch $SidUserPattern) { continue }
+        try {
+            $candidate = [System.IO.Path]::GetFullPath($entry.Path).TrimEnd('\')
+        } catch {
+            continue
+        }
+        if ([string]::Equals($candidate, $wanted, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $found += $entry.Sid
+        }
+    }
+    $found = @($found | Select-Object -Unique)
+    if ($found.Count -ne 1) {
+        throw "'$ProfilePath' is not the profile of exactly one user account."
+    }
+    return $found[0]
+}
+
+function Invoke-RemoteSetup {
+    # ssh.exe signs in with the key and the key ACL of the identity that runs it, so the remote setup has to
+    # run as the person who owns ProfilePath. Setting HOME or USERPROFILE for a child process does not
+    # change that identity.
+    #   Same identity   -> the script runs directly. It reports its own per-target results and fails
+    #                      (throws) when a target it tried failed.
+    #   Other identity  -> Deferred: nothing is read, connected or sent. SYSTEM (auto-updater) cannot
+    #                      continue as the user without a mechanism that runs code in the user's session,
+    #                      which this installer does not provide. The message holds the exact command.
+    # Status is Done, Deferred or Failed; the caller reports them differently.
+    param(
+        [Parameter(Mandatory = $true)][string]$RemoteScript,
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$ProfilePath
+    )
+
+    $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -SourceDir "{1}" -ProfilePath "{2}"' -f $RemoteScript, $SourceDir, $ProfilePath
+    $deferred = "The installer does not run as the profile user, so SSH keys, key permissions and the user environment would not be the user's. Nothing was read, connected or sent. Run this once as the user who owns '$ProfilePath': $command"
+    try {
+        $userSid = Resolve-ProfileSid -ProfilePath $ProfilePath
+    } catch {
+        return [pscustomobject]@{ Status = 'Deferred'; Message = "'$ProfilePath' could not be matched to one user account. $deferred" }
+    }
+    if ((Get-CurrentIdentitySid) -ne $userSid) {
+        return [pscustomobject]@{ Status = 'Deferred'; Message = $deferred }
+    }
+    try {
+        & $RemoteScript -SourceDir $SourceDir -ProfilePath $ProfilePath | Out-Host
+    } catch {
+        $err = $_
+        return [pscustomobject]@{ Status = 'Failed'; Message = $err.Exception.Message }
+    }
+    return [pscustomobject]@{ Status = 'Done'; Message = 'Remote OpenCode setup finished without a failed target. Skipped hosts are listed above.' }
+}
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
 foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js', 'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js', 'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js', 'managed\skills\design-patterns\SKILL.md', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
@@ -522,11 +613,12 @@ if (-not $voiceKey) {
 
 $remoteScript = Join-Path $SourceDir 'Install-OpenCodeRemote.ps1'
 if (Test-Path -LiteralPath $remoteScript) {
-    try {
-        & $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
-    } catch {
-        # The desktop app is already configured. A remote failure must not fail the Scoop install.
-        Write-Warning "Remote OpenCode setup was skipped: $($_.Exception.Message)"
+    # The desktop app is already configured. Neither a deferred nor a failed remote setup fails the Scoop install.
+    $remoteResult = Invoke-RemoteSetup -RemoteScript $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
+    switch ($remoteResult.Status) {
+        'Done' { Write-Host $remoteResult.Message }
+        'Deferred' { Write-Warning "Remote OpenCode setup deferred, not done: $($remoteResult.Message)" }
+        default { Write-Warning "Remote OpenCode setup failed: $($remoteResult.Message)" }
     }
 }
 # Scoop treats any non-zero exit as a failed install and then cannot find the manifest.
