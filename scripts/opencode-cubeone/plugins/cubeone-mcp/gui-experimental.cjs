@@ -20,10 +20,29 @@ const CALLBACK_SPEC = {
 }
 const Callback = gui.Ipc ? gui.Ipc.define(CALLBACK_SPEC) : { kind: "ipc", id: CALLBACK_SPEC.id, spec: CALLBACK_SPEC }
 
+// No sibling require is available in GUI bundles; match the server's plain RPC contract.
+const CallbackRelay = {
+  id: "cubeone-mcp.callback",
+  methods: {
+    send: {
+      input: {
+        type: "object",
+        properties: {
+          port: { type: "integer", minimum: 1, maximum: 65535 },
+          target: { type: "string", maxLength: 4096 },
+        },
+        required: ["port", "target"],
+        additionalProperties: false,
+      },
+      output: { type: "integer" },
+    },
+  },
+  events: {},
+}
+
 const REFRESH_MS = 20_000
 const LOGIN_POLL_MS = 3_000
 const LOGIN_WAIT_MS = 5 * 60_000
-const RELAY_WAIT_MS = 30_000
 // Integrations registered by cube one server plugins rather than by an MCP server.
 const PLUGIN_INTEGRATIONS = [{ id: "redmine", label: "cube project", method: "browser" }]
 
@@ -91,19 +110,15 @@ function loopbackPort(url) {
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined
 }
 
-/** A callback path with its query, restricted to URL characters that need no quoting inside single quotes. */
+/** Accept only OAuth callback paths with a plain query, never an arbitrary loopback request. */
 function isCallbackTarget(target) {
-  return typeof target === "string" && target.length <= 4096 && /^\/[A-Za-z0-9._~%&=:+/?,;@!*()-]*$/.test(target)
+  return typeof target === "string" && target.length <= 4096 &&
+    /^(?:\/callback|\/mcp\/oauth\/callback)\?(?:%[0-9A-Fa-f]{2}|[A-Za-z0-9\-._~&=+:@/?,;])+$/.test(target)
 }
 
-/**
- * The command that replays the browser's callback on the remote server, where the OAuth client listens on its own
- * 127.0.0.1. Undefined for anything that is not a plain callback target, so nothing else reaches a shell.
- */
-function relayCommand(port, target) {
-  if (!Number.isInteger(port) || port <= 0 || port >= 65536 || !isCallbackTarget(target)) return undefined
-  const url = `'http://127.0.0.1:${port}${target}'`
-  return `curl -fsS --max-time 20 -o /dev/null ${url} || wget -q -T 20 -O /dev/null ${url}`
+/** Current SessionRef uses location; retain compatibility with older GUI session objects. */
+function directoryOf(session) {
+  return session?.location?.directory ?? session?.directory
 }
 
 /**
@@ -165,23 +180,13 @@ function callbackService(holdMs = LOGIN_WAIT_MS + 60_000, createServer = http.cr
   }
 }
 
-/** Runs one command on the session's server and resolves with its exit code, or undefined if it did not end in time. */
-async function runOnServer(client, location, command, signal) {
-  const created = await client.shell.create({ location, command, timeout: RELAY_WAIT_MS })
-  const id = created?.data?.id
-  if (!id) throw new Error("Fehler: Der Server hat den Befehl nicht gestartet.")
-  const until = Date.now() + RELAY_WAIT_MS
-  try {
-    while (Date.now() < until && !signal?.aborted) {
-      const info = (await client.shell.get({ id, location }))?.data
-      if (info?.status === "exited") return info.exit ?? 0
-      if (info && info.status !== "running") return undefined
-      await waitForPoll(signal, 300)
-    }
-    return undefined
-  } finally {
-    void Promise.resolve(client.shell.remove?.({ id, location })).catch(() => {})
+/** Replay through the existing plugin RPC; credentials belong in the body, never shell-command logs. */
+async function relayOnServer(client, location, port, target, signal) {
+  if (!location?.directory) throw new Error("Missing callback relay location")
+  if (!Number.isInteger(port) || port <= 0 || port >= 65536 || !isCallbackTarget(target)) {
+    throw new Error("Invalid callback relay input")
   }
+  return client.rpc(CallbackRelay).send({ port, target }, { location, signal })
 }
 
 /** Sign-in state of the plugin integrations this server knows; unknown ones are left out. */
@@ -225,9 +230,10 @@ function guardPostMessage(original, schedule) {
 }
 
 exports.loopbackPort = loopbackPort
-exports.relayCommand = relayCommand
+exports.CallbackRelay = CallbackRelay
+exports.directoryOf = directoryOf
 exports.callbackService = callbackService
-exports.runOnServer = runOnServer
+exports.relayOnServer = relayOnServer
 exports.Callback = Callback
 exports.externalUrl = externalUrl
 exports.guardPostMessage = guardPostMessage
@@ -287,7 +293,7 @@ exports.default = Plugin.define({
     const loading = new Set()
     const warned = new Set()
 
-    const keyOf = (session) => `${session.server.id}\n${session.directory}`
+    const keyOf = (session) => `${session.server.id}\n${directoryOf(session)}`
     const store = (key, value) => {
       const next = new Map(states())
       next.set(key, value)
@@ -311,12 +317,12 @@ exports.default = Plugin.define({
     }
 
     const refresh = async (session) => {
-      if (!session?.directory) return
+      if (!directoryOf(session)) return
       const key = keyOf(session)
       if (loading.has(key)) return
       loading.add(key)
       try {
-        const location = { directory: session.directory }
+        const location = { directory: directoryOf(session) }
         const listed = await session.server.client.mcp.list({ location })
         const servers = listed?.data ?? []
         const integrations = await pluginIntegrations(session.server.client, location)
@@ -353,7 +359,7 @@ exports.default = Plugin.define({
     const exposeLoopback = async (session, url) => {
       const port = loopbackPort(url)
       const server = session?.server?.id
-      if (!port || !server || server === "sidecar") return undefined
+      if (!port || !server || server === "sidecar" || !directoryOf(session)) return undefined
       const callback = ctx.main(Callback)
       const id = await callback.listen(String(port))
       if (!id) return undefined
@@ -379,10 +385,11 @@ exports.default = Plugin.define({
           await waitForPoll(ctx.signal, 1_000)
         }
       }
-      const command = target ? relayCommand(port, target) : undefined
-      if (!command) return
+      if (!target) return
       try {
-        const code = await runOnServer(session.server.client, { directory: session.directory }, command, ctx.signal)
+        const code = await relayOnServer(
+          session.server.client, { directory: directoryOf(session) }, port, target, ctx.signal,
+        )
         if (code !== 0) throw new Error(`Fehler: Die Anmeldung konnte nicht an den Server übergeben werden (${code ?? "Zeitüberschreitung"}).`)
         void refresh(session)
       } catch (error) {
@@ -420,7 +427,7 @@ exports.default = Plugin.define({
     // Same steps as the app's own MCP toggle: the server's integration, its OAuth method, then the browser.
     const login = async (session, name) => {
       const client = session.server.client
-      const location = { directory: session.directory }
+      const location = { directory: directoryOf(session) }
       let stop
       try {
         const server = (await client.mcp.list({ location })).data.find((item) => item.name === name)
@@ -454,7 +461,7 @@ exports.default = Plugin.define({
 
     const loginIntegration = async (session, item) => {
       const client = session.server.client
-      const location = { directory: session.directory }
+      const location = { directory: directoryOf(session) }
       let stop
       try {
         const attempt = await client.integration.oauth.connect({ integrationID: item.id, methodID: item.method, location })
@@ -523,7 +530,7 @@ exports.default = Plugin.define({
                 : status === "failed"
                   ? () =>
                       void session.server.client.experimental.mcp
-                        .connect({ server: server.name, location: { directory: session.directory } })
+                        .connect({ server: server.name, location: { directory: directoryOf(session) } })
                         .catch(() => {})
                         .then(() => refresh(session))
                   : undefined,

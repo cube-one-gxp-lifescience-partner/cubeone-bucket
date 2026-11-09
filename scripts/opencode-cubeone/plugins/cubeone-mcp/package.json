@@ -9,6 +9,6 @@
     "./server": "./server.js"
   },
   "scripts": {
-    "test": "node --test test/mcp.test.js"
+    "test": "node --test test/*.test.js"
   }
 }

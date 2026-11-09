@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
-import plugin, { labelOf, unavailableNote } from "../server.js"
+import plugin, { CallbackRelay, labelOf, unavailableNote } from "../server.js"
 
 const servers = [
   { name: "cube-note", title: "Outline", status: { status: "connected" } },
@@ -31,10 +31,15 @@ test("the note names unavailable servers and the login button", () => {
 test("the context hook adds the note for the session's directory", async () => {
   let hook
   let asked
+  let registered
   await plugin.setup({
+    rpc: { register: async (definition, methods) => (registered = { definition, methods }) },
     session: { get: async () => ({ location: { directory: "C:/p" } }), hook: async (_name, callback) => (hook = callback) },
     mcp: { list: async (input) => ((asked = input), { data: servers }) },
   })
+  assert.deepEqual(registered.definition, CallbackRelay)
+  assert.deepEqual(CallbackRelay.events, {})
+  await assert.rejects(registered.methods.send({ port: 0, target: "/callback?code=x" }, {}), /Invalid callback relay input/)
   const input = { sessionID: "s", system: [] }
   await hook(input)
   assert.deepEqual(asked, { location: { directory: "C:/p" } })
@@ -182,7 +187,7 @@ test("a remote session replays the browser's callback on the server, without a s
   try {
     const gui = module.default
     const added = []
-    const commands = []
+    const relays = []
     let connected = false
     const client = {
       mcp: {
@@ -194,13 +199,22 @@ test("a remote session replays the browser's callback on the server, without a s
         get: async () => ({ data: { methods: [{ id: "browser", type: "oauth" }] } }),
         oauth: { connect: async () => ({ data: { url } }) },
       },
-      shell: {
-        create: async (input) => (commands.push(input), { data: { id: "sh1", status: "running" } }),
-        get: async () => ((connected = true), { data: { id: "sh1", status: "exited", exit: 0 } }),
-        remove: async () => {},
+      rpc: (definition) => {
+        assert.deepEqual(definition, CallbackRelay)
+        return {
+          send: async (input, options) => {
+            relays.push({ input, options })
+            connected = true
+            return 0
+          },
+        }
       },
+      shell: { create: async () => { throw new Error("Callbacks must not use shell commands") } },
     }
-    const session = { server: { id: "coding-vm-1", client }, directory: "/home/cubeone/app" }
+    const session = {
+      server: { id: "coding-vm-1", client },
+      get location() { return { directory: "/home/cubeone/app" } },
+    }
     const controller = new AbortController()
     let provided
     stopMain = gui.main({ provide: (token, impl) => (provided = { token, impl }) })
@@ -235,9 +249,10 @@ test("a remote session replays the browser's callback on the server, without a s
     assert.equal(page.status, 200)
     assert.match(await page.text(), /Anmeldung wird abgeschlossen/)
     await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal(commands.length, 1)
-    assert.deepEqual(commands[0].location, { directory: "/home/cubeone/app" })
-    assert.match(commands[0].command, new RegExp(`^curl .*'http://127\\.0\\.0\\.1:${port}/callback\\?code=abc_123&state=xyz-9'`))
+    assert.equal(relays.length, 1)
+    assert.deepEqual(relays[0].input, { port, target: "/callback?code=abc_123&state=xyz-9" })
+    assert.deepEqual(relays[0].options.location, { directory: "/home/cubeone/app" })
+    assert.equal(relays[0].options.signal, controller.signal)
     await assert.rejects(fetch(`http://127.0.0.1:${port}/callback?code=again`))
 
     controller.abort()
@@ -271,16 +286,26 @@ test("the local listener answers only plain GET callbacks and gives way when the
   }
 })
 
-test("relayCommand quotes only plain callback targets", () => {
+test("the GUI and server share one RPC contract and pass callbacks as data", async () => {
   const module = loadModule()
-  assert.equal(
-    module.relayCommand(44637, "/callback?code=a1&state=b2"),
-    "curl -fsS --max-time 20 -o /dev/null 'http://127.0.0.1:44637/callback?code=a1&state=b2' || wget -q -T 20 -O /dev/null 'http://127.0.0.1:44637/callback?code=a1&state=b2'",
-  )
-  assert.equal(module.relayCommand(44637, "/callback?code='x'"), undefined)
-  assert.equal(module.relayCommand(44637, "/callback?code=$(id)"), undefined)
-  assert.equal(module.relayCommand(44637, "callback"), undefined)
-  assert.equal(module.relayCommand(0, "/callback"), undefined)
+  assert.deepEqual(module.CallbackRelay, CallbackRelay)
+  assert.equal(module.directoryOf({ location: { directory: "C:/current" }, directory: "C:/old" }), "C:/current")
+  assert.equal(module.directoryOf({ directory: "C:/old" }), "C:/old")
+  const calls = []
+  const client = {
+    rpc: () => ({ send: async (...args) => (calls.push(args), 0) }),
+    shell: { create: async () => { throw new Error("Callbacks must not use shell commands") } },
+  }
+  const location = { directory: "C:/remote" }
+  assert.equal(await module.relayOnServer(client, location, 44637, "/callback?code=a1&state=b2"), 0)
+  assert.deepEqual(calls[0], [{ port: 44637, target: "/callback?code=a1&state=b2" }, { location, signal: undefined }])
+  for (const target of ["/callback?code='x'", "/callback?code=$(id)", "callback", "/admin?code=x"]) {
+    await assert.rejects(module.relayOnServer(client, location, 44637, target), /Invalid callback relay input/)
+  }
+  await assert.rejects(module.relayOnServer(client, location, 0, "/callback?code=x"), /Invalid callback relay input/)
+  await assert.rejects(module.relayOnServer(client, {}, 44637, "/callback?code=x"), /Missing callback relay location/)
+  assert.equal(calls.length, 1)
+  assert.doesNotMatch(readFileSync(new URL("../gui-experimental.cjs", import.meta.url), "utf8"), /shell\.create|curl -fsS|wget -q/)
 })
 test("the settings switch holds the browser open until the SSH forward is listening", async () => {
   const require = createRequire(import.meta.url)

@@ -1,3 +1,25 @@
+import { relayCallback } from "./callback-relay.js"
+
+// Rpc.define preserves this plain definition; keep the GUI's inline contract in sync.
+export const CallbackRelay = {
+  id: "cubeone-mcp.callback",
+  methods: {
+    send: {
+      input: {
+        type: "object",
+        properties: {
+          port: { type: "integer", minimum: 1, maximum: 65535 },
+          target: { type: "string", maxLength: 4096 },
+        },
+        required: ["port", "target"],
+        additionalProperties: false,
+      },
+      output: { type: "integer" },
+    },
+  },
+  events: {},
+}
+
 const STATUS_TEXT = {
   needs_auth: "Anmeldung nötig",
   failed: "nicht erreichbar",
@@ -27,6 +49,9 @@ export function unavailableNote(servers) {
 export default {
   id: "cubeone-mcp",
   async setup(ctx) {
+    await ctx.rpc.register(CallbackRelay, {
+      send: async (input, context) => relayCallback(input, { signal: context.signal }),
+    })
     const directories = new Map()
     await ctx.session.hook("context", async (input) => {
       try {
