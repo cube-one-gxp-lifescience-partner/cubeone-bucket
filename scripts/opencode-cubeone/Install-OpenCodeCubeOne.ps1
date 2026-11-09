@@ -18,6 +18,9 @@
     The default run stops there. It starts no ssh or wsl, reads no SSH config and sets no principal. Each user sets
     the personal cube one id once with Set-OpenCodePrincipal.ps1 from this package.
 
+    -RequireManagedUpdate fails if the installed managed tree differs from staging, before personal configuration,
+    registry key checks or remote setup. Without it, skipped updates retain their warning-only behavior.
+
     -FullInstall adds the remote setup of WSL distros and Linux SSH hosts (Install-OpenCodeRemote.ps1) for
     administrators. It needs the SSH keys of the profile owner and passwordless sudo on the servers, and it runs
     only as the Windows user who owns the profile. As SYSTEM or as a different account it is deferred with the
@@ -27,7 +30,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$SourceDir,
     # Also runs the remote setup (WSL, Linux SSH hosts). Without it nothing remote is touched.
-    [switch]$FullInstall
+    [switch]$FullInstall,
+    # Require the installed managed tree to match the package before any personal or remote steps.
+    [switch]$RequireManagedUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -220,7 +225,7 @@ function Sync-ManagedTree {
     if ($locked.Count -gt 0) {
         # Do not throw. Scoop runs this script before it links the app, and a throw leaves an
         # install without a current junction. Status then says the install failed and the manifest was removed.
-        Write-Warning "OpenCode is running and keeps files in $Target open ($($locked -join ', ')). Close OpenCode and run the installation again. Nothing was changed."
+        Write-Warning "OpenCode is running and keeps files in $Target open ($($locked -join ', ')). Close OpenCode and run 'scoop update opencode-cubeone --force' again. Nothing was changed."
         return 'locked'
     }
 
@@ -289,7 +294,7 @@ function Install-ManagedConfiguration {
             }
         }
     } elseif (-not (Test-CanWrite -Path $Target)) {
-        Write-Warning "The managed OpenCode configuration in $Target is outdated and locked. Run 'scoop update opencode-desktop --force' as administrator, or let the auto-updater apply it."
+        Write-Warning "The managed OpenCode configuration in $Target is outdated and locked. Run 'scoop update opencode-cubeone --force' as administrator, or let the auto-updater apply it."
         return
     }
 
@@ -625,6 +630,15 @@ try {
     }
 
     Install-ManagedConfiguration -Staging $staging -Target (Join-Path $env:ProgramData 'opencode')
+    # Legacy callers may continue after a skipped update. The configuration package requires actual content parity.
+    if ($RequireManagedUpdate) {
+        $managedTarget = Join-Path $env:ProgramData 'opencode'
+        if (-not (Test-TreeEqual -Source $staging -Target $managedTarget)) {
+            throw ("Managed OpenCode configuration in $managedTarget does not match the package after installation. " +
+                "Close OpenCode and run 'scoop update opencode-cubeone --force' as administrator, " +
+                'or let the auto-updater apply it.')
+        }
+    }
 } finally {
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 }

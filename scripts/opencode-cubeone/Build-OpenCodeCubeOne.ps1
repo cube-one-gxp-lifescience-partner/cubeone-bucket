@@ -4,7 +4,12 @@
 
 .DESCRIPTION
     Rebuild the plugin first (npm ci; npm run build in plugins\cubeone-stt) when its sources changed.
-    Then point the opencode-desktop manifest at the new zip and hash.
+    Then update the independent opencode-cubeone manifest version, zip URL and hash.
+
+.NOTES
+    Author: Marvin Fenßel
+    Created: 09.11.2026
+    Changelog: 09.11.2026 - Document the independently versioned configuration package.
 #>
 [CmdletBinding()]
 param(

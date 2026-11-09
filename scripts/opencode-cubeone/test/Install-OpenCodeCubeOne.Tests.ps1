@@ -3,8 +3,9 @@
     Regression tests for the Windows installer Install-OpenCodeCubeOne.ps1.
 
 .DESCRIPTION
-    Runs on Windows PowerShell 5.1 and PowerShell 7 without Pester. The installer is never executed: only its
-    function definitions are loaded. Everything happens in a temporary directory with synthetic data.
+    Runs on Windows PowerShell 5.1 and PowerShell 7 without Pester. The installer is never executed in full:
+    function definitions and selected orchestration statements are loaded. Everything happens in a temporary
+    directory with synthetic data, with downstream configuration, key checks and remote steps mocked.
 
     - JSONC parsing: commas, comments and escapes inside strings stay untouched.
     - MCP merge: personal MCP servers and settings survive, only missing cube one servers are added.
@@ -440,6 +441,117 @@ foreach ($elevated in @($false, $true)) {
         $script:UseRealIcacls = $false
     }
 }
+# Exercise the actual orchestration statements, not a duplicate of the strict check. Staging construction and
+# package validation are excluded; the target and every downstream dependency are confined to synthetic data.
+$managedTry = @($installerAst.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.TryStatementAst]
+})[0]
+$managedStatements = @($managedTry.Body.Statements)
+$installIndex = 0
+while ($managedStatements[$installIndex].Extent.Text -notlike 'Install-ManagedConfiguration *') {
+    $installIndex++
+}
+$managedStep = [scriptblock]::Create(($managedStatements[$installIndex..($managedStatements.Count - 1)] |
+    ForEach-Object { $_.Extent.Text }) -join "`n")
+$downstream = [scriptblock]::Create(($installerAst.EndBlock.Statements | Where-Object {
+    $_.Extent.StartLineNumber -gt $managedTry.Extent.EndLineNumber -and
+    $_.Extent.Text -notlike '$global:LASTEXITCODE*' -and $_.Extent.Text -ne 'exit 0'
+} | ForEach-Object { $_.Extent.Text }) -join "`n")
+
+foreach ($strict in @($false, $true)) {
+    foreach ($state in @('identical', 'identical-locked', 'updated', 'locked', 'denied', 'postcheck', 'apply-failed')) {
+        Invoke-Case "managed orchestration: $state (RequireManagedUpdate=$strict)" {
+            Reset-Mocks
+            $RequireManagedUpdate = $strict
+            $FullInstall = $true
+            $SourceDir = New-TempDir 'package'
+            $staging = New-StagingTree -Content 'new'
+            $programData = New-TempDir 'program-data'
+            $target = Join-Path $programData 'opencode'
+            Copy-Item -LiteralPath $staging -Destination $target -Recurse
+            $file = Join-Path $target 'opencode.jsonc'
+            if ($state -notin @('identical', 'identical-locked')) { Write-Utf8File $file 'old' }
+            if ($state -eq 'updated') {
+                Remove-Item -LiteralPath (Join-Path $target 'rules\a.md')
+                Write-Utf8File (Join-Path $target 'stale.txt') 'obsolete package file'
+            }
+            $stamp = (Get-Item -LiteralPath $file).LastWriteTimeUtc
+            $acl = Get-Acl -LiteralPath $target
+            $beforeSddl = $acl.Sddl
+            $stream = $null
+            $savedProgramData = $env:ProgramData
+            $script:DownstreamCalls = 0
+            function Resolve-TargetProfilePath { return $SourceDir }
+            function Install-UserConfiguration {
+                param([string]$Source, [string]$ProfilePath)
+                $script:DownstreamCalls++
+            }
+            function Get-OpenRouterApiKey {
+                param([string]$Name)
+                $script:DownstreamCalls++
+                return ''
+            }
+            function Invoke-RemoteSetupStep {
+                param([bool]$FullInstall, [string]$RemoteScript, [string]$SourceDir, [string]$ProfilePath)
+                $script:DownstreamCalls++
+            }
+            if ($state -eq 'postcheck') {
+                # Local function mock: only this case skips application, the real implementation is restored
+                # automatically when Invoke-Case's script block returns.
+                function Install-ManagedConfiguration { param([string]$Staging, [string]$Target) }
+            }
+            if ($state -eq 'apply-failed') {
+                function Sync-ManagedTree {
+                    param([string]$Source, [string]$Target)
+                    throw 'copy application failed (simulated)'
+                }
+            }
+            try {
+                $env:ProgramData = $programData
+                if ($state -in @('locked', 'identical-locked')) {
+                    $stream = [System.IO.File]::Open($file, 'Open', 'Read', 'Read')
+                }
+                if ($state -eq 'denied') {
+                    $deniedAcl = Get-Acl -LiteralPath $target
+                    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+                    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        $sid, 'Write', 'ContainerInherit,ObjectInherit', 'None', 'Deny')
+                    $deniedAcl.AddAccessRule($rule)
+                    Set-Acl -LiteralPath $target -AclObject $deniedAcl
+                    Assert-True (-not (& $realTestCanWrite -Path $target)) 'real write denial not established'
+                }
+                $failed = $false
+                try {
+                    & $managedStep
+                    & $downstream
+                } catch {
+                    $failed = $true
+                    $expectedMessage = if ($state -eq 'apply-failed') { '*application failed*' } else { '*does not match*' }
+                    Assert-True ($_.Exception.Message -like $expectedMessage) 'unexpected failure'
+                }
+                $expectedFailure = ($strict -and $state -in @('locked', 'denied', 'postcheck')) -or
+                    $state -eq 'apply-failed'
+                Assert-Equal $failed $expectedFailure 'wrong completion status'
+                Assert-Equal $script:DownstreamCalls $(if ($expectedFailure) { 0 } else { 4 })
+                if ($state -in @('identical', 'identical-locked', 'updated')) {
+                    Assert-True (Test-TreeEqual -Source $staging -Target $target) 'installed tree differs'
+                    Assert-Equal (Get-Acl -LiteralPath $target).Sddl $beforeSddl 'existing ACL changed'
+                }
+                if ($state -in @('identical', 'identical-locked')) {
+                    Assert-Equal (Get-Item -LiteralPath $file).LastWriteTimeUtc $stamp 'current file rewritten'
+                }
+                if ($state -in @('locked', 'denied', 'postcheck')) {
+                    Assert-Equal ([System.IO.File]::ReadAllText($file)) 'old' 'blocked file changed'
+                }
+            } finally {
+                if ($stream) { $stream.Dispose() }
+                if ($state -eq 'denied') { Set-Acl -LiteralPath $target -AclObject $acl }
+                $env:ProgramData = $savedProgramData
+            }
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Optional rules: personal files are never overwritten or removed
 # ---------------------------------------------------------------------------------------------------------------
@@ -744,7 +856,13 @@ Invoke-Case 'lean default: the installer takes an opt-in -FullInstall switch, de
     $parameter = $installerAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'FullInstall' }
     Assert-True ($null -ne $parameter) 'FullInstall parameter missing'
     Assert-Equal $parameter.StaticType.Name 'SwitchParameter' 'FullInstall is not a switch'
-    Assert-Equal $installerAst.ParamBlock.Parameters.Count 2 'unexpected extra parameters'
+    Assert-Equal $installerAst.ParamBlock.Parameters.Count 3 'unexpected extra parameters'
+    $strictParameter = $installerAst.ParamBlock.Parameters | Where-Object {
+        $_.Name.VariablePath.UserPath -eq 'RequireManagedUpdate'
+    }
+    Assert-True ($null -ne $strictParameter) 'RequireManagedUpdate parameter missing'
+    Assert-Equal $strictParameter.StaticType.Name 'SwitchParameter' 'RequireManagedUpdate is not a switch'
+    Assert-True ($null -eq $strictParameter.DefaultValue) 'strict mode must default off'
 }
 
 Invoke-Case 'lean default: Invoke-RemoteSetup is called only inside Invoke-RemoteSetupStep, and only with -FullInstall' {

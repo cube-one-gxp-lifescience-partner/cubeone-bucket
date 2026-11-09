@@ -113,50 +113,45 @@ function isRemoteSession(session) {
   return typeof id === "string" && id !== "" && id !== "sidecar"
 }
 
-/**
- * The pill stores the off-switch on this PC. An SSH or WSL session applies rules on that server, so the same
- * file has to be written there too. Ids are limited to the rule-file alphabet, which keeps the shell text inert.
- */
-function remoteDisableCommand(ids) {
-  const disabled = [...ids].map((id) => String(id).toLowerCase()).sort()
-  if (disabled.some((id) => !/^[a-z0-9-]{1,80}$/.test(id))) throw new Error("Fehler: Die Auswahlliste ist ungültig.")
-  const body = JSON.stringify({ disabled })
-  return [
-    "umask 077",
-    'file="$HOME/.config/opencode/vorgaben-deaktiviert.json"',
-    'mkdir -p "$HOME/.config/opencode"',
-    `printf '%s\\n' '${body}' > "$file"`,
-    'if [ -d "$HOME/.local/config/opencode-people" ]; then',
-    '  find "$HOME/.local/config/opencode-people" -mindepth 2 -maxdepth 2 -type d -name opencode | while IFS= read -r cfg; do',
-    '    target="$cfg/vorgaben-deaktiviert.json"',
-    '    if [ -L "$target" ] || [ ! -e "$target" ]; then ln -sfn "$file" "$target"; else cp -f "$file" "$target" && chmod 600 "$target"; fi',
-    "  done",
-    "fi",
-  ].join("\n")
+// Keep this contract in sync with disabled-sync.cjs, as in cubeone-mcp's callback relay.
+const DisabledSync = {
+  id: "cubeone-vorgaben.disabled",
+  methods: {
+    replace: {
+      input: { type: "array", items: { type: "string", pattern: "^[a-z0-9-]{1,80}$" } },
+      output: {
+        type: "object",
+        properties: { committed: { const: true }, profileFailures: { type: "integer", minimum: 0 } },
+        required: ["committed", "profileFailures"],
+        additionalProperties: false,
+      },
+    },
+  },
+  events: {},
 }
 
-const SYNC_TIMEOUT_MS = 8_000
-
+/**
+ * Send a selection through the active session's existing server connection.
+ * @param {object} session - Session with its server client and location.
+ * @param {Iterable<string>} ids - Disabled rule IDs.
+ * @returns {Promise<object>} Server commit and profile propagation outcome.
+ * @author Marvin Fenßel
+ * @created 09.11.2026
+ * @changelog 09.11.2026 - Use platform-independent plugin RPC.
+ */
 async function writeRemoteDisabled(session, ids) {
   const client = session?.server?.client
-  if (!client?.shell?.create || !client?.shell?.get) throw new Error("remote-shell")
-  const command = remoteDisableCommand(ids)
-  const location = { directory: session.directory || "/tmp" }
-  const created = await client.shell.create({ location, command, timeout: SYNC_TIMEOUT_MS })
-  const id = created?.data?.id
-  if (!id) throw new Error("remote-shell")
-  try {
-    const until = Date.now() + SYNC_TIMEOUT_MS
-    let info
-    while (Date.now() < until) {
-      info = (await client.shell.get({ id, location }))?.data
-      if (info?.status && info.status !== "running") break
-      await new Promise((resolve) => setTimeout(resolve, 200))
-    }
-    if (info?.status !== "exited" || (info.exit ?? 0) !== 0) throw new Error("remote-shell")
-  } finally {
-    void Promise.resolve(client.shell.remove?.({ id, location })).catch(() => {})
+  if (!client?.rpc || !session.directory) throw new Error("remote-sync")
+  const disabled = [...ids].map((id) => String(id).toLowerCase()).sort()
+  if (disabled.some((id) => !/^[a-z0-9-]{1,80}$/.test(id) || /[^a-z0-9-]/.test(id))) throw new Error("Invalid rule IDs")
+  const saved = await client.rpc(DisabledSync).replace(disabled, {
+    location: { directory: session.directory },
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (saved?.committed !== true || !Number.isInteger(saved.profileFailures) || saved.profileFailures < 0) {
+    throw new Error("remote-sync")
   }
+  return saved
 }
 
 /** What the window shows: every rule, sorted by title, and the ids of the optional rules that are switched off. */
@@ -197,7 +192,8 @@ exports.dirsFrom = dirsFrom
 exports.snapshot = snapshot
 exports.toggleRule = toggleRule
 exports.isRemoteSession = isRemoteSession
-exports.remoteDisableCommand = remoteDisableCommand
+exports.writeRemoteDisabled = writeRemoteDisabled
+exports.DisabledSync = DisabledSync
 exports.Vorgaben = Vorgaben
 
 exports.default = Plugin.define({
@@ -214,6 +210,7 @@ exports.default = Plugin.define({
       loading: "Loading policies…",
       failed: "Policies unavailable",
       "sync.failed": "The switch was not saved on the server",
+      "sync.partial": "Saved on the server, but some personal profiles could not be synchronized",
     },
     de: {
       pill: "Richtlinien",
@@ -227,6 +224,7 @@ exports.default = Plugin.define({
       loading: "Richtlinien werden geladen …",
       failed: "Richtlinien nicht lesbar",
       "sync.failed": "Der Schalter wurde auf dem Server nicht gespeichert",
+      "sync.partial": "Auf dem Server gespeichert, aber einige Personenprofile konnten nicht synchronisiert werden",
     },
   },
   main(ctx) {
@@ -248,7 +246,16 @@ exports.default = Plugin.define({
     const enqueue = (session, ids) => {
       const key = String(session.server.id)
       const prev = tails.get(key) ?? Promise.resolve()
-      const next = prev.catch(() => {}).then(() => writeRemoteDisabled(session, ids))
+      const next = prev.catch(() => {}).then(() => writeRemoteDisabled(session, ids)).then((result) => {
+        if (result.profileFailures > 0) {
+          try {
+            ctx.toast?.show?.({ variant: "warning", title: ctx.t("pill"), description: ctx.t("sync.partial") })
+          } catch {
+            console.warn("Policy profile synchronization warning could not be displayed")
+          }
+        }
+        return result
+      })
       tails.set(key, next)
       return next
     }

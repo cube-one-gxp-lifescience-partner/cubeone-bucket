@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import * as fs from "node:fs"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import Module, { createRequire } from "node:module"
 import os from "node:os"
@@ -107,20 +108,40 @@ test("main lists the configured folders and toggles only optional rules", () => 
     assert.deepEqual(JSON.parse(provided.impl.toggle("paket")).disabled, ["paket"])
     assert.deepEqual(JSON.parse(provided.impl.toggle("geheimnisse")).disabled, ["paket"])
     assert.deepEqual(JSON.parse(provided.impl.toggle("oidc")).disabled, ["paket"])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("unknown")).disabled, ["paket"])
+    writeFileSync(options.disabledFile, "invalid JSON")
+    assert.deepEqual(JSON.parse(provided.impl.list()).disabled, [])
+    assert.deepEqual(JSON.parse(provided.impl.toggle("paket")).disabled, ["paket"])
     assert.deepEqual(JSON.parse(provided.impl.toggle("paket")).disabled, [])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test("remoteDisableCommand writes the off-switch and rejects anything that is not a rule id", () => {
+test("remote synchronization uses the session RPC, not a shell, and rejects invalid IDs", async () => {
   const gui = loadGui()
-  const command = gui.remoteDisableCommand(["Design", "mcp"])
-  assert.match(command, /printf '%s\\n' '\{"disabled":\["design","mcp"\]\}'/)
+  const sync = createRequire(import.meta.url)("../disabled-sync.cjs")
+  assert.deepEqual(gui.DisabledSync, sync.DisabledSync)
+  for (const directory of ["C:\\Users\\remote\\repo", "/home/remote/repo"]) {
+    const calls = []
+    const session = { directory, server: { id: "ssh:remote", client: {
+      rpc: (contract) => {
+        assert.deepEqual(contract, sync.DisabledSync)
+        return { replace: async (...args) => (calls.push(args), { committed: true, profileFailures: 0 }) }
+      },
+    } } }
+    await gui.writeRemoteDisabled(session, new Set(["Design", "mcp"]))
+    assert.deepEqual(calls[0][0], ["design", "mcp"])
+    assert.deepEqual(calls[0][1].location, { directory })
+    await assert.rejects(gui.writeRemoteDisabled(session, ["design'; rm -rf /"]))
+    assert.equal(calls.length, 1)
+  }
+  await assert.rejects(gui.writeRemoteDisabled({ directory: "/repo", server: { client: {
+    rpc: () => ({ replace: async () => { throw new Error("unavailable") } }),
+  } } }, []), /unavailable/)
   assert.equal(gui.isRemoteSession({ server: { id: "ssh:coding-vm-1" } }), true)
   assert.equal(gui.isRemoteSession({ server: { id: "sidecar" } }), false)
   assert.equal(gui.isRemoteSession(undefined), false)
-  assert.throws(() => gui.remoteDisableCommand(["design'; rm -rf /"]))
 })
 
 test("the pill shows what main lists, mandatory rules without a button, and toggles optional ones", async () => {
@@ -162,3 +183,134 @@ test("the pill shows what main lists, mandatory rules without a button, and togg
   controller.abort()
   cleanup()
 })
+
+test("a failed remote toggle rolls back locally and reports the existing sync error", async () => {
+  const gui = loadGui()
+  const rules = [{ id: "design", tier: "optional", title: "Design" }]
+  let disabled = []
+  let pill
+  const toggled = []
+  const errors = []
+  const session = { directory: "C:/repo", server: { id: "ssh:windows", client: {
+    rpc: () => ({ replace: async () => { throw new Error("offline") } }),
+  } } }
+  const cleanup = gui.default.setup({
+    t: (key) => key,
+    add: (_registry, value) => (pill = value),
+    main: () => ({
+      list: async () => JSON.stringify({ rules, disabled }),
+      toggle: async (id) => {
+        toggled.push(id)
+        disabled = disabled.length ? [] : [id]
+        return JSON.stringify({ rules, disabled })
+      },
+    }),
+    toast: { show: (error) => errors.push(error) },
+  })
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    // Both initial publication and a toggle use the same failure notification.
+    pill.show({ session }).rows[0].run()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(toggled, ["design", "design"])
+    assert.deepEqual(disabled, [])
+    assert.equal(pill.show({}).tone, undefined)
+    assert.ok(errors.some((error) => error.description === "sync.failed"))
+  } finally {
+    cleanup()
+  }
+})
+
+for (const failure of ["profile", "listing", "central"]) {
+  test(`remote ${failure} failure respects the central commit boundary`, async () => {
+    const gui = loadGui()
+    const { replaceDisabled } = createRequire(import.meta.url)("../disabled-sync.cjs")
+    const home = tempDir()
+    const file = path.join(home, "central.json")
+    const people = path.join(home, ".local", "config", "opencode-people")
+    const profiles = ["first", "second"].map((name) => path.join(people, name, "opencode", "vorgaben-deaktiviert.json"))
+    const original = JSON.stringify({ disabled: [] })
+    writeFileSync(file, original)
+    for (const profile of profiles) {
+      mkdirSync(path.dirname(profile), { recursive: true })
+      writeFileSync(profile, original)
+    }
+    let failedOnce = false
+    const outcomes = []
+    const denied = () => Object.assign(new Error("denied"), { code: "EACCES" })
+    const io = {
+      ...fs,
+      readdirSync: (folder) => {
+        if (failure === "listing" && folder === people) throw denied()
+        return fs.readdirSync(folder).sort()
+      },
+      writeFileSync: (destination, ...args) => {
+        if (failure === "profile" && destination === profiles[1]) throw denied()
+        if (failure === "central" && destination === file && !failedOnce) {
+          failedOnce = true
+          // A partial overwrite must also be restored before reporting failure.
+          fs.writeFileSync(destination, "partial")
+          throw denied()
+        }
+        return fs.writeFileSync(destination, ...args)
+      },
+    }
+    const rules = [{ id: "design", tier: "optional", title: "Design" }]
+    let disabled = []
+    let pill
+    const errors = []
+    const controller = new AbortController()
+    const cleanup = gui.default.setup({
+      signal: controller.signal,
+      t: (key) => gui.default.i18n.de[key] ?? key,
+      add: (_registry, value) => (pill = value),
+      main: () => ({
+        list: async () => JSON.stringify({ rules, disabled }),
+        toggle: async (id) => {
+          disabled = disabled.length ? [] : [id]
+          return JSON.stringify({ rules, disabled })
+        },
+      }),
+      toast: { show: (error) => errors.push(error) },
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      const session = { directory: home, server: { id: "ssh:test", client: {
+        rpc: () => ({ replace: async (ids) => {
+          const result = replaceDisabled(ids, file, { fs: io, home })
+          outcomes.push(result)
+          return result
+        } }),
+      } } }
+      // Initial publication succeeds; inject the failure only for the changed selection.
+      const healthy = { ...session, server: { ...session.server, client: {
+        rpc: () => ({ replace: async () => ({ committed: true, profileFailures: 0 }) }),
+      } } }
+      pill.show({ session: healthy })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      pill.show({ session }).rows[0].run()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const expected = failure === "central" ? [] : ["design"]
+      assert.deepEqual(disabled, expected)
+      assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).disabled, expected)
+      if (failure === "central") {
+        assert.equal(fs.readFileSync(file, "utf8"), original)
+        assert.ok(errors.some((error) => error.variant === "error"))
+      } else {
+        assert.deepEqual(outcomes, [{ committed: true, profileFailures: 1 }])
+        assert.equal(pill.show({}).tone, "warning")
+        assert.deepEqual(JSON.parse(fs.readFileSync(profiles[1], "utf8")).disabled, [])
+        if (failure === "profile") {
+          assert.deepEqual(JSON.parse(fs.readFileSync(profiles[0], "utf8")).disabled, ["design"])
+        }
+        assert.ok(errors.some((error) => error.variant === "warning"
+          && error.description.includes("Personenprofile") && error.description.includes("gespeichert")))
+        assert.ok(!errors.some((error) => error.variant === "error"))
+      }
+    } finally {
+      controller.abort()
+      cleanup()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+}

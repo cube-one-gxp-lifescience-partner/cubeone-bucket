@@ -7,7 +7,15 @@ const test = require('node:test');
 
 const installer = fs.readFileSync(path.join(__dirname, '../Install-OpenCodeRemote.ps1'), 'utf8');
 const python = installer.match(/python3 - "\$USER_CONFIG" "\$STAGE\/user\/opencode\.jsonc" <<'PY'[^\n]*\n([\s\S]*?)\nPY/)[1];
-const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+const bash = (() => {
+  if (process.platform !== 'win32') return 'bash';
+  const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+  if (git.status === 0) {
+    const gitBash = path.resolve(git.stdout.trim(), '../../..', 'bin', 'bash.exe');
+    if (fs.existsSync(gitBash)) return gitBash;
+  }
+  return path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe');
+})();
 const toPosix = (file) => process.platform === 'win32' ? file.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, drive) => '/' + drive.toLowerCase()) : file;
 
 function fixture(context, original) {
@@ -43,7 +51,8 @@ test('Linux merge preserves BOM, escaped strings, URLs, permissions and personal
   assert.equal(backups.length, 1);
   assert.deepEqual(fs.readFileSync(path.join(files.directory, backups[0])), originalBytes);
   const first = fs.readFileSync(files.destination);
-  assert.equal(merge(files).status, 0);
+  const second = merge(files);
+  assert.equal(second.status, 0, second.error?.message ?? second.stderr);
   assert.deepEqual(fs.readFileSync(files.destination), first);
   assert.equal(fs.readdirSync(files.directory).filter((name) => name.includes('.bak-cubeone-mcp-')).length, 1);
 });
@@ -51,12 +60,14 @@ test('Linux merge preserves BOM, escaped strings, URLs, permissions and personal
 test('Linux merge adds missing structures but malformed configuration remains byte-for-byte unchanged', (context) => {
   for (const original of ['{}', '{"name":"hello"}']) {
     const files = fixture(context, original);
-    assert.equal(merge(files).status, 0);
+    const result = merge(files);
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
     assert.equal(JSON.parse(fs.readFileSync(files.destination)).mcp.servers.trace.url, 'https://trace.example/mcp');
   }
   for (const original of ['', '{', '[]', '{"mcp":"invalid"}', '{"mcp":{"servers":[]}}', '{/* unterminated']) {
     const files = fixture(context, original);
     const result = merge(files);
+    assert.equal(result.error, undefined, result.error?.message ?? result.stderr);
     assert.notEqual(result.status, 0);
     assert.equal(fs.readFileSync(files.destination, 'utf8'), original);
     assert.equal(fs.readdirSync(files.directory).filter((name) => name.includes('.bak-cubeone-mcp-')).length, 0);
@@ -75,7 +86,7 @@ test('Linux merge without Python keeps the existing personal file', (context) =>
   fs.copyFileSync(files.template, path.join(files.directory, 'user', 'opencode.jsonc'));
   const script = 'set -eu\ncommand() { return 1; }\nHOME_DIR="$TEST_HOME"\nSTAGE="$TEST_HOME"\n' + section;
   const result = spawnSync(bash, ['-s'], { input: script, encoding: 'utf8', env: { ...process.env, TEST_HOME: toPosix(files.directory) } });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr);
   assert.match(result.stderr, /python3 unavailable/);
   assert.equal(fs.readFileSync(user, 'utf8'), '{"personal":"unchanged"}');
 });
@@ -87,6 +98,7 @@ test('Linux managed write failure aborts without falling back onto personal conf
   assert.ok(!section.includes('ROOT="$HOME_DIR'));
   const script = 'set -eu\nid() { printf 123; }\nmkdir() { return 1; }\ncommand() { return 1; }\n' + section;
   const result = spawnSync(bash, ['-s'], { input: script, encoding: 'utf8' });
+  assert.equal(result.error, undefined, result.error?.message ?? result.stderr);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /personal configuration was not changed/);
   assert.equal(fs.readFileSync(files.destination, 'utf8'), 'personal sentinel');

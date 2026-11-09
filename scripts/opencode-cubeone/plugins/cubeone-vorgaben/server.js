@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
+import disabledSync from "./disabled-sync.cjs"
 import os from "node:os"
 import path from "node:path"
 import {
@@ -123,6 +124,11 @@ export default {
     const gate = ctx.options?.gate !== false
     const rulesOptional = typeof ctx.options?.rulesOptional === "string" ? ctx.options.rulesOptional : undefined
     const disabledFile = typeof ctx.options?.disabledFile === "string" ? ctx.options.disabledFile : undefined
+    if (ctx.rpc?.register) {
+      await ctx.rpc.register(disabledSync.DisabledSync, {
+        replace: async (ids) => disabledSync.replaceDisabled(ids, disabledFile),
+      })
+    }
     const curated = curatedModels(ctx.options?.models)
     if (Object.keys(curated).length) await ctx.model.transform((draft) => disableUncurated(draft, curated))
 
