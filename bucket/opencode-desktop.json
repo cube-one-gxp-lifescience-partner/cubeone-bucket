@@ -1,61 +1,19 @@
 {
     "version": "2.2.6",
-    "description": "OpenCode Desktop with the cube one configuration: only OpenRouter models with zero data retention, locked managed settings and company rules, cube one MCP servers and dictation via OpenRouter EU",
+    "description": "OpenCode Desktop application and CLI",
     "homepage": "https://opencode.ai",
     "license": "MIT",
-    "notes": [
-        "The managed configuration lives in C:\\ProgramData\\opencode and is read-only for everyone except Administrators and SYSTEM.",
-        "Put the keys in HKLM\\SOFTWARE\\cubeone\\OpenCode. OpenRouterApiKey is for models and everything else. OpenRouterVoiceApiKey is only for dictation. Neither value is part of this package. Set OPENCODE_DISABLE_FREE_MODELS=1, then restart OpenCode.",
-        "MCP servers and optional rules are in ~\\.config\\opencode and stay editable."
-    ],
     "architecture": {
         "64bit": {
-            "url": [
-                "https://opencode.ai/files/bin/2.2.6/opencode-desktop-win-x64.exe#/dl.7z",
-                "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.19.zip"
-            ],
-            "hash": [
-                "ac52d2403711eee195924f7b5ac6d8609415bb07b9fff3b1206004a1f8a02906",
-                "fe190712ed06a4fa30e897b4e6b7e6db889684eb38694774381c9fda7f1fa964"
-            ],
-            "extract_to": [
-                "",
-                "cubeone"
-            ]
+            "url": "https://opencode.ai/files/bin/2.2.6/opencode-desktop-win-x64.exe#/dl.7z",
+            "hash": "ac52d2403711eee195924f7b5ac6d8609415bb07b9fff3b1206004a1f8a02906"
         }
     },
     "installer": {
         "script": [
             "Expand-7zipArchive \"$dir\\`$PLUGINSDIR\\app-64.7z\" \"$dir\"",
             "Remove-Item \"$dir\\`$PLUGINSDIR\", \"$dir\\`$R0\" -Recurse -Force -ErrorAction SilentlyContinue",
-            "Remove-Item \"$dir\\Uninstall OpenCode.exe\", \"$dir\\resources\\app-update.yml\" -Force -ErrorAction SilentlyContinue",
-            "",
-            "$shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source",
-            "if (-not $shell) {",
-            "    $shell = (Get-Command powershell).Source",
-            "}",
-            "& $shell -NoProfile -ExecutionPolicy Bypass -File \"$dir\\cubeone\\Install-OpenCodeCubeOne.ps1\" -SourceDir \"$dir\\cubeone\"",
-            "if ($LASTEXITCODE -ne 0) {",
-            "    throw \"cube one OpenCode configuration failed with exit code $LASTEXITCODE\"",
-            "}"
-        ]
-    },
-    "uninstaller": {
-        "script": [
-            "$managed = Join-Path $env:ProgramData 'opencode'",
-            "if (-not (Test-Path -LiteralPath $managed)) {",
-            "    return",
-            "}",
-            "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())",
-            "if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {",
-            "    warn \"$managed stays. It is read-only for this user; an administrator can remove it if OpenCode is no longer used.\"",
-            "    return",
-            "}",
-            "try {",
-            "    Remove-Item -LiteralPath $managed -Recurse -Force -ErrorAction Stop",
-            "} catch {",
-            "    warn \"$managed could not be removed. Close OpenCode and delete that folder as administrator.\"",
-            "}"
+            "Remove-Item \"$dir\\Uninstall OpenCode.exe\", \"$dir\\resources\\app-update.yml\" -Force -ErrorAction SilentlyContinue"
         ]
     },
     "bin": [
@@ -77,10 +35,7 @@
     "autoupdate": {
         "architecture": {
             "64bit": {
-                "url": [
-                    "https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z",
-                    "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.19.zip"
-                ]
+                "url": "https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z"
             }
         }
     }

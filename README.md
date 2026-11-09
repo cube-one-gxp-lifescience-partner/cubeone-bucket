@@ -41,22 +41,52 @@ Guide](https://github.com/ScoopInstaller/.github/blob/main/.github/CONTRIBUTING.
 and [App Manifests](https://github.com/ScoopInstaller/Scoop/wiki/App-Manifests)
 wiki page.
 
-## OpenCode Desktop (cube one package)
+## OpenCode Desktop and cube one configuration (separate packages)
 
-`bucket/opencode-desktop.json` installs the OpenCode desktop app (download from opencode.ai) and the cube one
-configuration from `files/opencode-cubeone-<version>.zip`. The zip is built from
-`scripts/opencode-cubeone`. Published zips are immutable: every change of the scripts, rules, plugins or
-configuration is a new zip with the next free version.
+`bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version 2.2.6).
+`bucket/opencode-cubeone.json` depends on `opencode-desktop` and independently versions the cube one configuration
+(version 1.1.20) from `files/opencode-cubeone-1.1.20.zip`. The ZIP root contains the installer, `managed`, `user`
+and `plugins`, without a `cubeone` subdirectory. Existing installer sync functions are reused.
+Published zips are immutable: every change of the scripts, rules, plugins or configuration needs a new version.
+
+ZIP 1.1.20 is built from source commit `0667f00` and its SHA-256 is recorded in the configuration manifest.
+The strict installer checks the actual managed file list and contents before confirming success.
+Desktop updates neither run that installer nor change machine or personal configuration.
+
+### One-time migration from the combined package
+
+After the split manifests and verified configuration ZIP are available, **close OpenCode Desktop AND its server**.
+Scoop updates run the **old installed `uninstaller.script`**, which deletes `%ProgramData%\opencode` when run as
+administrator. The app version remains 2.2.6, so a normal update will not replace that installed manifest.
+Perform this one-time forced Desktop reinstall before installing the configuration; do not start either process
+between these commands:
+
+```powershell
+scoop update opencode-desktop --force
+scoop install opencode-cubeone
+```
+
+Start Desktop/server only after the configuration install succeeds. The old uninstall may have removed the managed
+folder; the strict configuration install must restore it successfully before use. Personal files are retained.
+This is an explicit migration, not an automatic action on normal updates. The new Desktop manifest has no managed
+uninstaller, and uninstalling/updating the new configuration package never deletes `%ProgramData%\opencode`.
+
+The external auto-updater must explicitly include **`opencode-cubeone`** in its package list; keeping only
+`opencode-desktop` no longer updates configuration. That updater is not changed in this repository/package.
 
 ### Default install and the personal id
 
-The default install is lean and local. `scoop install opencode-desktop` and the auto-updater write the managed
-configuration in `%ProgramData%\opencode` and the user's `~\.config\opencode`, and check that the OpenRouter keys
-exist in the registry. They start no `ssh` or `wsl`, read no SSH config, set no personal id and register no
-desktop hosts. This also holds when the installer runs as SYSTEM.
+The default configuration install is lean and local. `scoop install opencode-cubeone` installs Desktop as a
+dependency, writes the managed configuration in `%ProgramData%\opencode`, seeds the user's `~\.config\opencode`
+without replacing personal files, and checks that the OpenRouter keys exist in the registry. The Scoop installer
+calls `Install-OpenCodeCubeOne.ps1 -RequireManagedUpdate`: a required managed update that cannot be applied fails
+installation rather than silently retaining stale managed files. Close Desktop AND its server before updates.
+It starts no `ssh` or `wsl`, reads no SSH config, sets no personal id and registers no desktop hosts.
+This also holds when the installer runs as SYSTEM. Desktop alone installs no cube one configuration.
 
 ```powershell
-scoop install opencode-desktop
+# Existing users of the combined package migrate first.
+scoop install opencode-cubeone
 ```
 
 #### Desktop server list (plugin `cubeone-ssh-hosts`)
@@ -119,7 +149,7 @@ Each user sets the personal cube one id (`CUBEONE_PRINCIPAL`) once, on every mac
 administrator rights are needed. The script ships in the package:
 
 ```powershell
-$source = Join-Path (scoop prefix opencode-desktop) 'cubeone'
+$source = scoop prefix opencode-cubeone
 & "$source\Set-OpenCodePrincipal.ps1"
 ```
 
@@ -165,7 +195,7 @@ and the OpenRouter key on WSL distros and Linux SSH hosts (`Install-OpenCodeRemo
 for with `-FullInstall`:
 
 ```powershell
-$source = Join-Path (scoop prefix opencode-desktop) 'cubeone'
+$source = scoop prefix opencode-cubeone
 & "$source\Install-OpenCodeCubeOne.ps1" -SourceDir $source -FullInstall
 # or only the remote part, for example one host and no WSL (one alias per call):
 & "$source\Install-OpenCodeRemote.ps1" -SourceDir $source -SkipWsl -OnlyHost coding-vm-1
@@ -188,7 +218,7 @@ session; there is no hook in this repository that does. After the deferral, run 
 the profile user, for example:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<scoop app dir>\cubeone\Install-OpenCodeRemote.ps1" -SourceDir "<scoop app dir>\cubeone" -ProfilePath "C:\Users\<name>"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<opencode-cubeone app dir>\Install-OpenCodeRemote.ps1" -SourceDir "<opencode-cubeone app dir>" -ProfilePath "C:\Users\<name>"
 ```
 
 The profile SID comes from `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList` (profile paths and SID
@@ -250,6 +280,11 @@ keep their values; a user can change these three keys by hand. There is no migra
 ### Tests
 
 Run all of them before building a package. Both shells must report no failure.
+The independent Scoop package contracts and migration documentation are checked without downloads:
+
+```powershell
+node --test tests/opencode-packages.test.cjs
+```
 
 ```powershell
 cd scripts\opencode-cubeone\test
@@ -296,7 +331,10 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
    previous bytes of such unchanged files into the export before building.
 3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
-4. In `bucket/opencode-desktop.json` change only the zip URL (second `url` entry under `architecture.64bit`
-   and the matching one in `autoupdate`) and its hash (second `hash` entry). Keep `version` and the hash of
-   the desktop download as they are.
+4. In `bucket/opencode-cubeone.json` update `version`, the ZIP `url` and its SHA-256 `hash` together.
+   ZIP 1.1.20 contains 4145 files: 4133 are byte-identical to 1.1.19, eight changed files and four new plugin
+   files match their committed sources. Production dependencies were reused without an update.
+   Do not release with a placeholder or without testing the strict managed installer. Leave
+   `bucket/opencode-desktop.json` unchanged for configuration releases. Desktop updates use its own upstream
+   `checkver`/`autoupdate`; configuration releases are independently maintained in `opencode-cubeone`.
 5. Commit the zip and the manifest. Push only after review.
