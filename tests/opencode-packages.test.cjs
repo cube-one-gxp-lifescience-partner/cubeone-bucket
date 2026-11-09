@@ -26,8 +26,8 @@ test('Desktop contains no configuration download, installer or managed uninstall
 });
 
 test('configuration has its own matching version and a one-way Desktop dependency', () => {
-    assert.equal(config.version, '1.1.20');
-    assert.match(config.url, /\/opencode-cubeone-1\.1\.20\.zip$/);
+    assert.equal(config.version, '1.1.21');
+    assert.match(config.url, /\/opencode-cubeone-1\.1\.21\.zip$/);
     assert.equal(config.depends, 'opencode-desktop');
     assert.equal(desktop.depends, undefined);
     assert.equal(config.extract_to, undefined);

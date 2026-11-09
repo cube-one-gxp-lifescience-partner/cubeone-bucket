@@ -1,5 +1,5 @@
 {
-    "version": "1.1.20",
+    "version": "1.1.21",
     "description": "cube one OpenCode configuration: managed settings, company rules, plugins and personal configuration seeds",
     "homepage": "https://github.com/cube-one-gxp-lifescience-partner/cubeone-bucket",
     "license": "MIT",
@@ -10,8 +10,8 @@
         "Put the keys in HKLM\\SOFTWARE\\cubeone\\OpenCode. OpenRouterApiKey is for models and everything else. OpenRouterVoiceApiKey is only for dictation. Neither value is part of this package. Set OPENCODE_DISABLE_FREE_MODELS=1, then restart OpenCode.",
         "Personal files in ~\\.config\\opencode are retained. No SSH or WSL setup runs automatically. Uninstalling or updating this package never removes C:\\ProgramData\\opencode."
     ],
-    "url": "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.20.zip",
-    "hash": "e5383dc7a917fb9005b8b8e7669c2e0f71b87c2971915cedc3fe85ef8d5e6293",
+    "url": "https://raw.githubusercontent.com/cube-one-gxp-lifescience-partner/cubeone-bucket/master/files/opencode-cubeone-1.1.21.zip",
+    "hash": "c858b410a88a8709f9bbe94eacdf6792b093e0b506115f74ada86cae689e7096",
     "installer": {
         "script": [
             "$shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source",

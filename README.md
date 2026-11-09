@@ -45,11 +45,11 @@ wiki page.
 
 `bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version 2.2.6).
 `bucket/opencode-cubeone.json` depends on `opencode-desktop` and independently versions the cube one configuration
-(version 1.1.20) from `files/opencode-cubeone-1.1.20.zip`. The ZIP root contains the installer, `managed`, `user`
+(version 1.1.21) from `files/opencode-cubeone-1.1.21.zip`. The ZIP root contains the installer, `managed`, `user`
 and `plugins`, without a `cubeone` subdirectory. Existing installer sync functions are reused.
 Published zips are immutable: every change of the scripts, rules, plugins or configuration needs a new version.
 
-ZIP 1.1.20 is built from source commit `0667f00` and its SHA-256 is recorded in the configuration manifest.
+ZIP 1.1.21 is built from source commit `830fdef` and its SHA-256 is recorded in the configuration manifest.
 The strict installer checks the actual managed file list and contents before confirming success.
 Desktop updates neither run that installer nor change machine or personal configuration.
 
@@ -156,9 +156,19 @@ $source = scoop prefix opencode-cubeone
 `Set-OpenCodePrincipal.ps1` (parameter `-ProfilePath`, default the current user's profile) makes ssh send
 `SetEnv CUBEONE_PRINCIPAL=<32 random URL-safe characters>` to `coding-vm-1` to `coding-vm-8` by adding a block to the
 **existing** `~\.ssh\config`. It reads no registry value, makes no SSH connection, starts no `wsl` or CLI installer
-and installs nothing.
+and installs nothing. This is also the behavior with `-FullInstall:$false`.
 
-It decides from what ssh would really use, read **offline** with `ssh.exe -G -F <config> <alias>` for each of the
+To opt into the existing full remote setup instead, run the following as the Windows user who owns the profile:
+
+```powershell
+& "$source\Set-OpenCodePrincipal.ps1" -FullInstall
+```
+
+This passes the package directory and `-ProfilePath` to `Install-OpenCodeRemote.ps1` without `-PrincipalOnly`.
+It includes the personal id step and the full WSL and SSH host setup; it does not run the machine installer.
+The remote script's profile-user identity check and errors still apply.
+
+In principal-only mode, it decides from what ssh would really use, read **offline** with `ssh.exe -G -F <config> <alias>` for each of the
 eight aliases. `-G` only prints the effective settings. It connects to nothing and reads no key, and neither its
 output nor the config is printed. The Windows OpenSSH client (`%SystemRoot%\System32\OpenSSH\ssh.exe`) is used first.
 OpenSSH uses only the first `SetEnv` line that applies to a host and ignores all later ones, which is why a plain
@@ -332,8 +342,9 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
 3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
 4. In `bucket/opencode-cubeone.json` update `version`, the ZIP `url` and its SHA-256 `hash` together.
-   ZIP 1.1.20 contains 4145 files: 4133 are byte-identical to 1.1.19, eight changed files and four new plugin
-   files match their committed sources. Production dependencies were reused without an update.
+   ZIP 1.1.21 contains 4145 files: 4143 are byte-identical to 1.1.20 and two changed files
+   (`Set-OpenCodePrincipal.ps1`, `plugins/cubeone-mcp/gui-experimental.cjs`) match their committed sources.
+    Production dependencies were reused without an update.
    Do not release with a placeholder or without testing the strict managed installer. Leave
    `bucket/opencode-desktop.json` unchanged for configuration releases. Desktop updates use its own upstream
    `checkver`/`autoupdate`; configuration releases are independently maintained in `opencode-cubeone`.
