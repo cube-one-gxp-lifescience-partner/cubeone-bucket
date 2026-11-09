@@ -156,6 +156,34 @@ reachable`) and never the raw output of `ssh`. A host is identified by `uname -s
 `Linux`) and, if that fails without a connection error, by a read-only PowerShell probe. The key is sent to a
 Windows host only after that probe identified it as Windows.
 
+### Models and agent roles
+
+The default model and the model of every role is **Auto (ZDR, EU)**: `openrouter-zdr/openrouter/auto`. It routes only
+among the models on its allow-list, only to EU endpoints under Zero Data Retention, and only to models that read
+images and PDFs. The root model has no variant and behaves like `balanced`. A role picks only the variant, which
+is the cost tier of the router:
+
+| Role | Variant | Cost tier |
+| --- | --- | --- |
+| `orchestrator`, `architect` | `intelligence` | max |
+| `developer`, `reviewer` | `balanced` | medium |
+| `quick`, `researcher` | `cost` | low |
+| `ask` | none, inherits the current model | |
+
+The router decides per request which allowed model answers, so a role has no fixed model and no fixed price. The
+price depends on the model that was chosen; the per-model prices stay in the generated configuration. Every
+variant repeats the allow-list and the EU/ZDR routing, because OpenCode replaces arrays instead of merging them.
+The role prompts and permissions did not change. If Auto (ZDR, EU) cannot be built, for example because the
+router or every EU image/PDF model is missing from the catalog, `Update-OpenCodeModels.ps1` stops and writes no
+file. It does not fall back to another model, to SALE or to a non-EU endpoint.
+
+Web search and dictation are separate: native search stays on its pinned Azure EU endpoint and dictation on
+Voxtral. Neither depends on the model of `researcher`.
+
+The memory plugin seed `user\opencode-mem.jsonc` uses Auto at variant `cost` (`opencodeProvider`,
+`opencodeModel`, `opencodeVariant`). The file is created once and never overwritten, so existing installations
+keep their values; a user can change these three keys by hand. There is no migration.
+
 ### Tests
 
 Run all of them before building a package. Both shells must report no failure.
@@ -165,6 +193,12 @@ cd scripts\opencode-cubeone\test
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-OpenCodeCubeOne.Tests.ps1
 pwsh -NoProfile -File .\Install-OpenCodeCubeOne.Tests.ps1
 powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 3.4.0; Invoke-Pester -Path .\Install-OpenCodeRemote.Tests.ps1"
+```
+
+The generator, the role mapping and the memory seed are tested with Node on synthetic catalogs (no network, no key):
+
+```powershell
+node --test scripts\opencode-cubeone\test scripts\opencode-cubeone\plugins\cubeone-sale\test
 ```
 
 `Install-OpenCodeRemote.Tests.ps1` needs Pester 3.4, which is installed for Windows PowerShell. Under `pwsh`

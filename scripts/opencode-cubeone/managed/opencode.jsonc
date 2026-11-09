@@ -9,7 +9,7 @@
   "websearch": {
     "provider": "cubeone-zdr"
   },
-  "model": "openrouter-zdr/~anthropic/claude-sonnet-latest",
+  "model": "openrouter-zdr/openrouter/auto",
   "providers": {
     "openrouter-zdr": {
       "name": "OpenRouter (ZDR)",
@@ -1295,7 +1295,8 @@
     "orchestrator": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~anthropic/claude-opus-latest"
+        "model": "openrouter/auto",
+        "variant": "intelligence"
       },
       "mode": "primary",
       "description": "Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.",
@@ -1336,7 +1337,8 @@
     "architect": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~anthropic/claude-opus-latest"
+        "model": "openrouter/auto",
+        "variant": "intelligence"
       },
       "mode": "subagent",
       "description": "Design, interfaces, data models and trade-offs for one question. Read-only.",
@@ -1362,7 +1364,8 @@
     "researcher": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~openai/gpt-luna-latest"
+        "model": "openrouter/auto",
+        "variant": "cost"
       },
       "mode": "subagent",
       "description": "Current external facts with sources via zero-data-retention web search. Read-only.",
@@ -1403,7 +1406,8 @@
     "developer": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~anthropic/claude-sonnet-latest"
+        "model": "openrouter/auto",
+        "variant": "balanced"
       },
       "mode": "subagent",
       "description": "Implements one work package of an approved plan, including its tests.",
@@ -1424,7 +1428,8 @@
     "quick": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~anthropic/claude-haiku-latest"
+        "model": "openrouter/auto",
+        "variant": "cost"
       },
       "mode": "subagent",
       "description": "Small mechanical changes: renames, boilerplate, formatting, simple tests.",
@@ -1445,7 +1450,8 @@
     "reviewer": {
       "model": {
         "providerID": "openrouter-zdr",
-        "model": "~openai/gpt-sol-latest"
+        "model": "openrouter/auto",
+        "variant": "balanced"
       },
       "mode": "subagent",
       "description": "Independent review of a finished work package against the plan; runs tests and the build. Read-only.",

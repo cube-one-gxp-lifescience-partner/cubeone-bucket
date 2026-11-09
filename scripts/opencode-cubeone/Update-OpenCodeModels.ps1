@@ -14,6 +14,10 @@
     new release is picked up without editing this list. Zero Data Retention, the EU pin and the price
     are taken from the concrete model the alias points at today. Auto's allow-list stays on those
     concrete ids, because the router matches concrete slugs, not aliases.
+    The default model and the model of every role is Auto (ZDR, EU). A role only picks the variant (cost tier):
+    orchestrator and architect intelligence, developer and reviewer balanced, quick and researcher cost. Ask has
+    no model and inherits the current one. If Auto (ZDR, EU) cannot be built, the script stops without
+    writing a file.
 #>
 [CmdletBinding()]
 param(
@@ -28,12 +32,16 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $ProviderId = 'openrouter-zdr'
-$DefaultModel = '~anthropic/claude-sonnet-latest'
 # OpenRouter's own router model. Not a real model, so it never appears on the ZDR endpoints list;
 # it inherits the provider's zdr=true/data_collection=deny and is additionally pinned with an
 # allowed_models allowlist (set below, after $CuratedModels is resolved) so it can only ever land
 # on one of our vetted ZDR models, never on an unreviewed sibling model from the same provider.
 $AutoRouterModel = 'openrouter/auto'
+# Auto (ZDR, EU) is the default model and the model of every role. A role picks only the variant, which is the
+# cost tier: cost = low, balanced = medium, intelligence = max. Auto is created further down; the run fails
+# there when it could not be built, so no role silently ends up on another model, on SALE or on a non-EU endpoint.
+# The root model has no variant: it is the untouched default body, which matches balanced (medium).
+$DefaultModel = $AutoRouterModel
 # OpenCode sends the model key to OpenRouter as the model id. A second key on the EU provider would also be
 # openrouter/auto, so SALE gets its own provider with the same key and the same ZDR settings.
 $SaleProviderId = 'openrouter-zdr-sale'
@@ -128,7 +136,8 @@ $Agents = [ordered]@{
         )
     }
     orchestrator = [ordered]@{
-        model       = '~anthropic/claude-opus-latest'
+        model       = $AutoRouterModel
+        variant     = 'intelligence'
         mode        = 'primary'
         description = 'Plans large software projects from requirements and coordinates subagents on other models. Edits nothing before the plan is approved.'
         permissions = @(
@@ -141,13 +150,16 @@ $Agents = [ordered]@{
         )
     }
     architect    = [ordered]@{
-        model       = '~anthropic/claude-opus-latest'
+        model       = $AutoRouterModel
+        variant     = 'intelligence'
         mode        = 'subagent'
         description = 'Design, interfaces, data models and trade-offs for one question. Read-only.'
         permissions = $ReadOnly
     }
     researcher   = [ordered]@{
-        model       = $SearchModel
+        # The chat model is independent of $SearchModel, which only serves the native web search backend.
+        model       = $AutoRouterModel
+        variant     = 'cost'
         mode        = 'subagent'
         description = 'Current external facts with sources via zero-data-retention web search. Read-only.'
         permissions = @(
@@ -160,7 +172,8 @@ $Agents = [ordered]@{
         )
     }
     developer    = [ordered]@{
-        model       = '~anthropic/claude-sonnet-latest'
+        model       = $AutoRouterModel
+        variant     = 'balanced'
         mode        = 'subagent'
         description = 'Implements one work package of an approved plan, including its tests.'
         permissions = @(
@@ -169,7 +182,8 @@ $Agents = [ordered]@{
         )
     }
     quick        = [ordered]@{
-        model       = '~anthropic/claude-haiku-latest'
+        model       = $AutoRouterModel
+        variant     = 'cost'
         mode        = 'subagent'
         description = 'Small mechanical changes: renames, boilerplate, formatting, simple tests.'
         permissions = @(
@@ -178,7 +192,8 @@ $Agents = [ordered]@{
         )
     }
     reviewer     = [ordered]@{
-        model       = '~openai/gpt-sol-latest'
+        model       = $AutoRouterModel
+        variant     = 'balanced'
         mode        = 'subagent'
         description = 'Independent review of a finished work package against the plan; runs tests and the build. Read-only.'
         permissions = $ReadOnly
@@ -302,10 +317,6 @@ foreach ($id in $CuratedModels) {
     Write-Host ("{0}  ->  {1}  {2}/{3}  {4}" -f $id, $concrete, $entry.cost.input, $entry.cost.output, $where)
 }
 
-if (-not $models.Contains($DefaultModel)) {
-    throw "The default model $DefaultModel did not pass the ZDR check. Pick another default."
-}
-
 $autoRouter = $catalog | Where-Object { $_.id -eq $AutoRouterModel } | Select-Object -First 1
 # Auto is one request, so it cannot carry a different EU pin per child model.
 # It therefore only offers models that have an EU endpoint, and the request itself
@@ -391,6 +402,20 @@ else {
             [ordered]@{ id = 'cost'; body = (& $autoBody 'low') }
             [ordered]@{ id = 'intelligence'; body = (& $autoBody 'max') }
         )
+    }
+}
+
+# The default model and every role run on Auto (ZDR, EU). Without it there is nothing safe to fall back to:
+# not the old Sonnet alias, not another provider and not SALE. The run stops instead of writing such a config.
+if (-not $models.Contains($DefaultModel)) {
+    throw "The default model $DefaultModel (Auto, ZDR, EU) could not be built: it needs the router in the catalog and an EU model with image and PDF input. No config was written."
+}
+foreach ($roleName in $Agents.Keys) {
+    $role = $Agents[$roleName]
+    if (-not $role.model) { continue }
+    $roleVariants = @($models[$role.model].variants | ForEach-Object { $_.id })
+    if (-not $models.Contains($role.model) -or $roleVariants -notcontains $role.variant) {
+        throw "Agent $roleName uses $($role.model) variant '$($role.variant)', which is not generated. No config was written."
     }
 }
 
@@ -493,12 +518,12 @@ foreach ($name in $Agents.Keys) {
     $agentConfig[$name] = [ordered]@{}
     # Agents without a model keep the model selected in the current session.
     if ($agent.model) {
-        $modelId = $agent.model
-        if (-not $models.Contains($modelId)) {
-            Write-Warning "Agent $name uses $modelId, which did not pass the ZDR check. It falls back to $DefaultModel."
-            $modelId = $DefaultModel
+        # No fallback: the role model was checked above and a missing one has already stopped the run.
+        $agentConfig[$name].model = [ordered]@{
+            providerID = $ProviderId
+            model      = $agent.model
+            variant    = $agent.variant
         }
-        $agentConfig[$name].model = [ordered]@{ providerID = $ProviderId; model = $modelId }
     }
     $agentConfig[$name].mode = $agent.mode
     $agentConfig[$name].description = $agent.description
