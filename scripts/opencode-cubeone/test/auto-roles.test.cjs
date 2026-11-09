@@ -143,6 +143,27 @@ test('managed config: every variant of Auto repeats the EU and ZDR body with onl
   assert.ok(auto.capabilities.input.includes('image') && auto.capabilities.input.includes('pdf'));
 });
 
+test('managed prompts equal the agent files (line endings aside) and name the Auto variants, not fixed models', () => {
+  const lf = (text) => text.replace(/\r\n/g, '\n');
+  for (const name of Object.keys(managed.agents)) {
+    const file = lf(fs.readFileSync(path.join(root, 'agents', `${name}.md`), 'utf8')).trim();
+    assert.equal(lf(managed.agents[name].system), file, name);
+  }
+  const prompt = lf(managed.agents.orchestrator.system);
+  const expected = [
+    ['architect', 'Intelligence'],
+    ['researcher', 'Cost'],
+    ['developer', 'Balanced'],
+    ['quick', 'Cost'],
+    ['reviewer', 'Balanced'],
+  ];
+  for (const [name, variant] of expected) {
+    assert.ok(prompt.includes(`\`${name}\` (Auto (ZDR, EU), variant ${variant}`), `${name} label`);
+  }
+  for (const stale of ['Claude Opus', 'Claude Sonnet', 'Claude Haiku', 'GPT-6', 'zero-data-retention web search']) {
+    assert.ok(!prompt.includes(stale), `stale label ${stale}`);
+  }
+});
 test('managed config: websearch and the native search backend are unchanged', () => {
   assert.deepEqual(managed.websearch, { provider: 'cubeone-zdr' });
   const stt = managed.plugins.find((plugin) => plugin.package?.endsWith('cubeone-stt'));

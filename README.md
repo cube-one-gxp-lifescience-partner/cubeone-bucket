@@ -158,10 +158,13 @@ Windows host only after that probe identified it as Windows.
 
 ### Models and agent roles
 
-The default model and the model of every role is **Auto (ZDR, EU)**: `openrouter-zdr/openrouter/auto`. It routes only
-among the models on its allow-list, only to EU endpoints under Zero Data Retention, and only to models that read
-images and PDFs. The root model has no variant and behaves like `balanced`. A role picks only the variant, which
-is the cost tier of the router:
+The default model and the model of every role is **Auto (ZDR, EU)**: `openrouter-zdr/openrouter/auto`. This is the
+existing global OpenRouter Auto router, and the request still goes through OpenRouter's global request handling.
+**This is not end-to-end EU data residency.** What the configuration pins is the inference: the router may only
+choose models on its allow-list that take image and PDF input, and the request carries `zdr: true`,
+`data_collection: deny`, an `only` list of EU endpoints and `allow_fallbacks: false`. These settings are unchanged
+by the role mapping and the variants do not widen them. The root model has no variant and behaves like `balanced`.
+A role picks only the variant, which is the cost tier of the router:
 
 | Role | Variant | Cost tier |
 | --- | --- | --- |
@@ -171,14 +174,18 @@ is the cost tier of the router:
 | `ask` | none, inherits the current model | |
 
 The router decides per request which allowed model answers, so a role has no fixed model and no fixed price. The
-price depends on the model that was chosen; the per-model prices stay in the generated configuration. Every
+variants set the `cost_tier` band (`low`, `medium`, `max`); they are not token prices. The price depends on the
+model that was chosen; the per-model prices stay in the generated configuration. Every
 variant repeats the allow-list and the EU/ZDR routing, because OpenCode replaces arrays instead of merging them.
 The role prompts and permissions did not change. If Auto (ZDR, EU) cannot be built, for example because the
 router or every EU image/PDF model is missing from the catalog, `Update-OpenCodeModels.ps1` stops and writes no
 file. It does not fall back to another model, to SALE or to a non-EU endpoint.
 
-Web search and dictation are separate: native search stays on its pinned Azure EU endpoint and dictation on
-Voxtral. Neither depends on the model of `researcher`.
+Web search and dictation are separate: native search stays on its pinned Luna model at the `azure/eu` endpoint and
+dictation on Voxtral. Neither depends on the model of `researcher`. The Zero Data Retention and EU guarantees above
+cover model inference only. The native web search is an OpenRouter server tool (see its documentation) and is
+**not** guaranteed to be EU-only or Zero Data Retention. The description "zero-data-retention web search" of the
+`researcher` agent therefore does not extend to the search backend.
 
 The memory plugin seed `user\opencode-mem.jsonc` uses Auto at variant `cost` (`opencodeProvider`,
 `opencodeModel`, `opencodeVariant`). The file is created once and never overwritten, so existing installations

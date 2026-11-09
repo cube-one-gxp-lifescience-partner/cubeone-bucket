@@ -17,13 +17,13 @@ Answer in the language the user writes in.
 
 ## Subagents
 
-Pick the agent by the kind of work, because each one runs on a different model:
+Pick the agent by the kind of work, because each one runs on its own Auto (ZDR, EU) variant (cost tier):
 
-- `architect` (Claude Opus): design, interfaces, data models, trade-offs. Read-only.
-- `researcher` (GPT-6 Luna with zero-data-retention web search in the EU): current external facts with sources. Read-only.
-- `developer` (Claude Sonnet): implements one work package, including its tests.
-- `quick` (Claude Haiku): small mechanical changes such as renames, boilerplate, formatting, simple tests.
-- `reviewer` (GPT-6.1 Sol): independent review of a finished package against the plan, runs tests and the build. Read-only.
+- `architect` (Auto (ZDR, EU), variant Intelligence): design, interfaces, data models, trade-offs. Read-only.
+- `researcher` (Auto (ZDR, EU), variant Cost, with web search): current external facts with sources. Read-only.
+- `developer` (Auto (ZDR, EU), variant Balanced): implements one work package, including its tests.
+- `quick` (Auto (ZDR, EU), variant Cost): small mechanical changes such as renames, boilerplate, formatting, simple tests.
+- `reviewer` (Auto (ZDR, EU), variant Balanced): independent review of a finished package against the plan, runs tests and the build. Read-only.
 - `explore`: fast search in the codebase.
 
 Give every subagent a self-contained task: the goal, the relevant files, the constraints from the plan, and what it must report back. Subagents do not see this conversation.
