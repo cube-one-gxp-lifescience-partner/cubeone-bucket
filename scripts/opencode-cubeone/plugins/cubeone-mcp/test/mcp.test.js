@@ -102,7 +102,7 @@ test("the pill lists each server and opens the browser for a login", async () =>
   assert.equal(pill.show({ session }).title, "MCP-Server werden geprüft …")
   await new Promise((resolve) => setTimeout(resolve, 20))
   const view = pill.show({ session })
-  assert.equal(view.label, "MCP 1/3")
+  assert.equal(view.label, "MCP 1/4")
   assert.equal(view.tone, "danger")
   const lab = view.rows.find((row) => row.label === "LAB11")
   assert.equal(lab.detail, "Anmeldung nötig")
@@ -119,6 +119,48 @@ test("the pill lists each server and opens the browser for a login", async () =>
   controller.abort()
   cleanup()
 })
+
+for (const scenario of [
+  { name: "cube project signed in", project: true, expected: "MCP 8/8", tone: "success" },
+  { name: "cube project signed out", project: false, expected: "MCP 7/8", tone: "warning" },
+  { name: "cube project unavailable", project: undefined, expected: "MCP 7/7", tone: "success" },
+  { name: "no MCP servers, cube project signed in", project: true, empty: true, expected: "MCP 1/1", tone: "success" },
+]) {
+  test(`the pill count includes ${scenario.name} and excludes disabled servers`, async () => {
+    const gui = loadGui()
+    const added = []
+    const listed = scenario.empty ? [] : [
+      ...Array.from({ length: 7 }, (_, index) => ({ name: `server-${index}`, status: { status: "connected" } })),
+      { name: "disabled", status: { status: "disabled" } },
+    ]
+    const client = {
+      mcp: { list: async () => ({ data: listed }) },
+      integration: { get: async () => ({ data: scenario.project === undefined ? undefined : {
+        id: "redmine", connections: scenario.project ? [{ id: "c1" }] : [],
+      } }) },
+    }
+    const session = { server: { id: "sidecar", client }, directory: "C:/p" }
+    const controller = new AbortController()
+    const cleanup = gui.setup({
+      t: (key) => gui.i18n.de[key] ?? key,
+      add: (_registry, value) => added.push(value),
+      toast: { show: () => {} },
+      sessions: { current: () => session },
+      signal: controller.signal,
+    })
+    try {
+      added[0].show({ session })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const view = added[0].show({ session })
+      assert.equal(view.label, scenario.expected)
+      assert.equal(view.tone, scenario.tone)
+      assert.equal(view.rows.filter((row) => row.label === "cube project").length, scenario.project === undefined ? 0 : 1)
+    } finally {
+      controller.abort()
+      cleanup()
+    }
+  })
+}
 
 test("the cube project row signs in with the plugin's browser method", async () => {
   const gui = loadGui()

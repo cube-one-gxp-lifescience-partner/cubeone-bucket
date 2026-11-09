@@ -507,12 +507,15 @@ exports.default = Plugin.define({
           return { label: ctx.t("pill"), icon: "mcp", tone: "danger", title: ctx.t("list.failed"), rows: [{ id: "error", label: state.error, icon: "circle-xmark", tone: "danger" }, { id: "refresh", label: ctx.t("refresh"), icon: "refresh", run: () => void refresh(session) }] }
         }
         const enabled = state.servers.filter((server) => server.status.status !== "disabled")
+        const integrations = state.integrations ?? []
+        const total = enabled.length + integrations.length
         const connected = enabled.filter((server) => server.status.status === "connected").length
+          + integrations.filter((item) => item.connected).length
         const tone = enabled.some((server) => server.status.status === "failed")
           ? "danger"
-          : enabled.some((server) => server.status.status === "needs_auth")
+          : enabled.some((server) => server.status.status === "needs_auth") || integrations.some((item) => !item.connected)
             ? "warning"
-            : enabled.length
+            : total
               ? "success"
               : undefined
         const rows = state.servers.map((server) => {
@@ -536,7 +539,7 @@ exports.default = Plugin.define({
                   : undefined,
           }
         })
-        for (const item of state.integrations ?? []) {
+        for (const item of integrations) {
           rows.push({
             id: `integration:${item.id}`,
             label: item.label,
@@ -548,7 +551,7 @@ exports.default = Plugin.define({
         }
         if (!rows.length) rows.push({ id: "none", label: ctx.t("none"), icon: "mcp" })
         rows.push({ id: "refresh", label: ctx.t("refresh"), icon: "refresh", run: () => void refresh(session) })
-        return { label: `${ctx.t("pill")} ${connected}/${enabled.length}`, icon: "mcp", tone, title: ctx.t("title"), rows }
+        return { label: `${ctx.t("pill")} ${connected}/${total}`, icon: "mcp", tone, title: ctx.t("title"), rows }
       },
     })
 

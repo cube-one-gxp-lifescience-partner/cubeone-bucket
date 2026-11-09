@@ -25,14 +25,39 @@
       settings at the top still apply to every host. Everything else stays byte for byte. The file keeps its
       permissions.
 
-    It reads no registry value, starts no ssh connection or wsl, installs nothing and touches no other file.
-    The work is done by Install-OpenCodeRemote.ps1 -PrincipalOnly, which stops before the key is read.
+    By default it reads no registry value, starts no ssh connection or wsl, installs nothing and touches no
+    other file. The work is done by Install-OpenCodeRemote.ps1 -PrincipalOnly, which stops before the key is read.
+
+    With -FullInstall, it runs the existing full remote setup instead, including the personal id step, WSL
+    distros and SSH hosts. It uses this package directory as SourceDir and must still run as the profile user.
+    The remote script's identity guard and errors apply unchanged in both modes.
+
+.PARAMETER ProfilePath
+    The Windows profile owned by the current user. Defaults to USERPROFILE.
+
+.PARAMETER FullInstall
+    Opts into the full Install-OpenCodeRemote.ps1 setup instead of setting only the personal id.
+    Omitting the switch or passing -FullInstall:$false keeps the principal-only behavior.
+
+.EXAMPLE
+    & "$source\Set-OpenCodePrincipal.ps1" -FullInstall
+    Runs the full remote setup as the profile user, using the package containing this script.
+
+.NOTES
+    Author:     Marvin Fenßel
+    Created:    09.11.2026
+    Changelog:  09.11.2026 - Added explicit full remote setup opt-in.
 #>
 [CmdletBinding()]
 param(
-    [string]$ProfilePath = $env:USERPROFILE
+    [string]$ProfilePath = $env:USERPROFILE,
+    [switch]$FullInstall
 )
 
 $ErrorActionPreference = 'Stop'
 $remote = Join-Path $PSScriptRoot 'Install-OpenCodeRemote.ps1'
-& $remote -ProfilePath $ProfilePath -PrincipalOnly
+if ($FullInstall) {
+    & $remote -SourceDir $PSScriptRoot -ProfilePath $ProfilePath
+} else {
+    & $remote -ProfilePath $ProfilePath -PrincipalOnly
+}
