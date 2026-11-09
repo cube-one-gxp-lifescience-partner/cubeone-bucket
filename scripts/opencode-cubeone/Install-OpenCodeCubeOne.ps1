@@ -14,10 +14,20 @@
     Works as SYSTEM (auto-updater), as an elevated administrator and as a standard user. A standard
     user can create the machine directory once; updating an existing one works only where its
     permissions already allow it.
+
+    The default run stops there. It starts no ssh or wsl, reads no SSH config and sets no principal. Each user sets
+    the personal cube one id once with Set-OpenCodePrincipal.ps1 from this package.
+
+    -FullInstall adds the remote setup of WSL distros and Linux SSH hosts (Install-OpenCodeRemote.ps1) for
+    administrators. It needs the SSH keys of the profile owner and passwordless sudo on the servers, and it runs
+    only as the Windows user who owns the profile. As SYSTEM or as a different account it is deferred with the
+    command to run once as that user; nothing is read, connected or sent.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$SourceDir
+    [Parameter(Mandatory = $true)][string]$SourceDir,
+    # Also runs the remote setup (WSL, Linux SSH hosts). Without it nothing remote is touched.
+    [switch]$FullInstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -561,8 +571,34 @@ function Invoke-RemoteSetup {
     }
     return [pscustomobject]@{ Status = 'Done'; Message = 'Remote OpenCode setup finished without a failed target. Skipped hosts are listed above.' }
 }
+
+function Invoke-RemoteSetupStep {
+    # The default install does not touch anything remote, not even as the profile user. Only -FullInstall calls
+    # Invoke-RemoteSetup.
+    param(
+        [Parameter(Mandatory = $true)][bool]$FullInstall,
+        [Parameter(Mandatory = $true)][string]$RemoteScript,
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$ProfilePath
+    )
+
+    if (-not $FullInstall) {
+        $principalScript = Join-Path $SourceDir 'Set-OpenCodePrincipal.ps1'
+        Write-Host "Remote setup not run (default install). Each user sets the personal id once, as that user: & `"$principalScript`""
+        Write-Host 'Administrators run the full remote setup with -FullInstall.'
+        return
+    }
+    # The desktop app is already configured. Neither a deferred nor a failed remote setup fails the Scoop install.
+    $remoteResult = Invoke-RemoteSetup -RemoteScript $RemoteScript -SourceDir $SourceDir -ProfilePath $ProfilePath
+    switch ($remoteResult.Status) {
+        'Done' { Write-Host $remoteResult.Message }
+        'Deferred' { Write-Warning "Remote OpenCode setup deferred, not done: $($remoteResult.Message)" }
+        default { Write-Warning "Remote OpenCode setup failed: $($remoteResult.Message)" }
+    }
+}
+
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
-foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js', 'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js', 'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js', 'managed\skills\design-patterns\SKILL.md', 'Install-OpenCodeRemote.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
+foreach ($required in @('managed\opencode.jsonc', 'managed\rules', 'managed\vorgaben', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js', 'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty', 'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs', 'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs', 'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js', 'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js', 'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js', 'managed\skills\design-patterns\SKILL.md', 'Install-OpenCodeRemote.ps1', 'Set-OpenCodePrincipal.ps1', 'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben', 'user\rules\optional')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) {
         throw "Package is incomplete, missing $required"
     }
@@ -612,15 +648,7 @@ if (-not $voiceKey) {
 }
 
 $remoteScript = Join-Path $SourceDir 'Install-OpenCodeRemote.ps1'
-if (Test-Path -LiteralPath $remoteScript) {
-    # The desktop app is already configured. Neither a deferred nor a failed remote setup fails the Scoop install.
-    $remoteResult = Invoke-RemoteSetup -RemoteScript $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
-    switch ($remoteResult.Status) {
-        'Done' { Write-Host $remoteResult.Message }
-        'Deferred' { Write-Warning "Remote OpenCode setup deferred, not done: $($remoteResult.Message)" }
-        default { Write-Warning "Remote OpenCode setup failed: $($remoteResult.Message)" }
-    }
-}
+Invoke-RemoteSetupStep -FullInstall ([bool]$FullInstall) -RemoteScript $remoteScript -SourceDir $SourceDir -ProfilePath $targetProfile
 # Scoop treats any non-zero exit as a failed install and then cannot find the manifest.
 $global:LASTEXITCODE = 0
 exit 0

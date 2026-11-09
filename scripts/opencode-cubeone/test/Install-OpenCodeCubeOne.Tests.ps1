@@ -658,10 +658,173 @@ Invoke-Case 'caller: deferred, failed and done are reported differently, no text
 Invoke-Case 'no scheduled task, impersonation or credential code exists in the installer, the remote script or the key script' {
     $directory = Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path
     $forbidden = '(?i)Scheduled' + 'Task|schtasks|Start-Process[^\r\n]*-Credential|RunAs|LogonUser|Impersonat|-Password|HighestAvailable'
-    foreach ($name in @('Install-OpenCodeCubeOne.ps1', 'Install-OpenCodeRemote.ps1', 'Update-OpenCodeKey.ps1')) {
+    foreach ($name in @('Install-OpenCodeCubeOne.ps1', 'Install-OpenCodeRemote.ps1', 'Update-OpenCodeKey.ps1', 'Set-OpenCodePrincipal.ps1')) {
         $text = [System.IO.File]::ReadAllText((Join-Path $directory $name))
         Assert-True ($text -notmatch $forbidden) "$name contains cross-identity machinery"
     }
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Default install is lean, -FullInstall opts in to the remote setup.
+# The installer script itself runs in-process on a synthetic package. Only what reaches outside is replaced by a
+# recording stub: the managed directory, the user profile, the registry key read, the registry profile list and
+# the identity. The remote script in the package is a stub that only records that it ran. No ssh, wsl, key,
+# registry value or scheduled task is involved.
+# ---------------------------------------------------------------------------------------------------------------
+$installerText = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $InstallerPath).Path)
+
+function New-SyntheticPackage {
+    $package = New-TempDir 'package'
+    $required = @(
+        'managed\opencode.jsonc', 'managed\rules\a.md', 'managed\vorgaben\a.md', 'managed\skills\design-patterns\SKILL.md',
+        'plugins\cubeone-stt\package.json', 'plugins\cubeone-stt\dist\gui-experimental.cjs', 'plugins\cubeone-stt\dist\server.js',
+        'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty\index.js',
+        'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs',
+        'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs',
+        'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js',
+        'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js',
+        'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js',
+        'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben\a.md', 'user\rules\optional\a.md',
+        'Set-OpenCodePrincipal.ps1')
+    foreach ($item in $required) {
+        Write-Utf8File (Join-Path $package $item) 'x'
+    }
+    $stubBody = 'param([string]$SourceDir, [string]$ProfilePath)' + "`n" +
+        '[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot ''ran.txt''), "$SourceDir|$ProfilePath")' + "`n"
+    Write-Utf8File (Join-Path $package 'Install-OpenCodeRemote.ps1') $stubBody
+    return $package
+}
+
+function New-WholeRunScript {
+    # The installer with the outside-facing functions replaced by recorders. Everything else is the real text.
+    $stubs = @{
+        'Get-OpenRouterApiKey'         = 'function Get-OpenRouterApiKey { param([string]$Name) [void]$global:WholeRunCalls.Add("Get-OpenRouterApiKey:$Name"); return "" }'
+        'Install-ManagedConfiguration' = 'function Install-ManagedConfiguration { param($Staging, $Target) [void]$global:WholeRunCalls.Add("Install-ManagedConfiguration") }'
+        'Install-UserConfiguration'    = 'function Install-UserConfiguration { param($Source, $ProfilePath) [void]$global:WholeRunCalls.Add("Install-UserConfiguration") }'
+        'Resolve-TargetProfilePath'    = 'function Resolve-TargetProfilePath { return "C:\Users\Anna" }'
+        'Get-CurrentIdentitySid'       = 'function Get-CurrentIdentitySid { [void]$global:WholeRunCalls.Add("Get-CurrentIdentitySid"); return $global:WholeRunSid }'
+        'Get-ProfileListEntry'         = 'function Get-ProfileListEntry { [void]$global:WholeRunCalls.Add("Get-ProfileListEntry"); return $global:WholeRunProfiles }'
+    }
+    $edits = foreach ($name in $stubs.Keys) {
+        $definition = $installerAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+        [pscustomobject]@{ Start = $definition.Extent.StartOffset; End = $definition.Extent.EndOffset; Text = $stubs[$name] }
+    }
+    $text = $installerText
+    foreach ($edit in ($edits | Sort-Object Start -Descending)) {
+        $text = $text.Substring(0, $edit.Start) + $edit.Text + $text.Substring($edit.End)
+    }
+    $path = Join-Path (New-TempDir 'modified-installer') 'Install-OpenCodeCubeOne.modified.ps1'
+    Write-Utf8File $path $text
+    return $path
+}
+
+function Invoke-WholeInstall {
+    param([string]$CurrentSid, [switch]$FullInstall)
+
+    $package = New-SyntheticPackage
+    $global:WholeRunCalls = New-Object System.Collections.ArrayList
+    $global:WholeRunSid = $CurrentSid
+    $global:WholeRunProfiles = @([pscustomobject]@{ Sid = $sidUserA; Path = 'C:\Users\Anna' })
+    $parameters = @{ SourceDir = $package }
+    if ($FullInstall) { $parameters['FullInstall'] = $true }
+    $output = & $script:ModifiedInstaller @parameters 3>&1 6>&1 | Out-String -Width 4000
+    $ran = Test-Path -LiteralPath (Join-Path $package 'ran.txt')
+    return [pscustomobject]@{
+        Calls   = @($global:WholeRunCalls)
+        Package = $package
+        Ran     = $ran
+        Output  = $output
+    }
+}
+
+$script:ModifiedInstaller = New-WholeRunScript
+
+Invoke-Case 'lean default: the installer takes an opt-in -FullInstall switch, default off' {
+    $parameter = $installerAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'FullInstall' }
+    Assert-True ($null -ne $parameter) 'FullInstall parameter missing'
+    Assert-Equal $parameter.StaticType.Name 'SwitchParameter' 'FullInstall is not a switch'
+    Assert-Equal $installerAst.ParamBlock.Parameters.Count 2 'unexpected extra parameters'
+}
+
+Invoke-Case 'lean default: Invoke-RemoteSetup is called only inside Invoke-RemoteSetupStep, and only with -FullInstall' {
+    $calls = @($installerAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-RemoteSetup' }, $true))
+    Assert-Equal $calls.Count 1 'Invoke-RemoteSetup call sites'
+    $step = $installerAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-RemoteSetupStep' }, $true)
+    Assert-True ($calls[0].Extent.StartOffset -ge $step.Extent.StartOffset -and $calls[0].Extent.EndOffset -le $step.Extent.EndOffset) 'call is outside the step'
+    $guard = $step.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] }, $false) | Select-Object -First 1
+    Assert-True ($guard.Clauses[0].Item1.Extent.Text -eq '-not $FullInstall') 'the step is not gated on FullInstall'
+    Assert-True ($guard.Clauses[0].Item2.Extent.Text -match 'return') 'default does not return before the remote call'
+    $scriptCalls = @($installerAst.EndBlock.Statements | Where-Object { $_.Extent.Text -match '^Invoke-RemoteSetupStep ' })
+    Assert-Equal $scriptCalls.Count 1 'script-level call'
+    Assert-True ($scriptCalls[0].Extent.Text.Contains('-FullInstall ([bool]$FullInstall)')) 'switch is not passed through'
+}
+
+Invoke-Case 'lean default: the installer never touches ssh, wsl, the SSH config or a principal itself' {
+    $commandNames = @($installerAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) |
+            ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+    foreach ($native in @('ssh', 'ssh.exe', 'wsl', 'wsl.exe', 'sqlite3', 'node', 'tar', 'tar.exe', 'ssh-keygen')) {
+        Assert-True ($commandNames -notcontains $native) "installer starts $native"
+    }
+    Assert-True ($installerText -notmatch 'CUBEONE_PRINCIPAL|Set-DesktopPrincipal|Register-DesktopSshHosts|\.ssh\\config') 'installer touches the SSH config or the principal'
+}
+
+foreach ($identity in @(@('profile user', $sidUserA), @('SYSTEM', 'S-1-5-18'), @('another account', $sidUserB))) {
+    Invoke-Case "lean default ($($identity[0])): machine and user configuration and key checks run, nothing remote is called, no identity or profile list is read" {
+        $run = Invoke-WholeInstall -CurrentSid $identity[1]
+        Assert-True (-not $run.Ran) 'the remote script ran'
+        Assert-Equal (@($run.Calls | Where-Object { $_ -in @('Get-CurrentIdentitySid', 'Get-ProfileListEntry') }).Count) 0 'identity or profile list was read'
+        Assert-Equal (@($run.Calls | Where-Object { $_ -eq 'Install-ManagedConfiguration' }).Count) 1 'machine configuration missing'
+        Assert-Equal (@($run.Calls | Where-Object { $_ -eq 'Install-UserConfiguration' }).Count) 1 'user configuration missing'
+        Assert-True ($run.Calls -contains 'Get-OpenRouterApiKey:OpenRouterApiKey') 'model key check missing'
+        Assert-True ($run.Calls -contains 'Get-OpenRouterApiKey:OpenRouterVoiceApiKey') 'voice key check missing'
+        Assert-True ($run.Output -match 'Remote setup not run') 'default does not say that nothing remote ran'
+        Assert-True ($run.Output.Contains('Set-OpenCodePrincipal.ps1')) 'default does not name the principal script'
+        Assert-True ($run.Output -notmatch 'deferred') 'default reports a deferral'
+        Assert-True ($run.Output -notmatch 'Nothing was read, connected or sent') 'default prints the deferral text'
+    }
+}
+
+Invoke-Case 'full install (profile user): the remote script runs once with the exact paths' {
+    $run = Invoke-WholeInstall -CurrentSid $sidUserA -FullInstall
+    Assert-True $run.Ran 'the remote script did not run'
+    Assert-Equal ([System.IO.File]::ReadAllText((Join-Path $run.Package 'ran.txt'))) "$($run.Package)|C:\Users\Anna"
+    Assert-Equal (@($run.Calls | Where-Object { $_ -eq 'Install-ManagedConfiguration' }).Count) 1
+    Assert-Equal (@($run.Calls | Where-Object { $_ -eq 'Install-UserConfiguration' }).Count) 1
+    Assert-True ($run.Output -match 'Remote OpenCode setup finished') 'result not reported'
+}
+
+foreach ($identity in @(@('SYSTEM', 'S-1-5-18'), @('another account', $sidUserB))) {
+    Invoke-Case "full install ($($identity[0])): deferred with the command, nothing runs, no impersonation" {
+        $run = Invoke-WholeInstall -CurrentSid $identity[1] -FullInstall
+        Assert-True (-not $run.Ran) 'the remote script ran in the wrong identity'
+        Assert-True ($run.Output -match 'Remote OpenCode setup deferred, not done') 'deferral not reported'
+        Assert-True ($run.Output.Contains("-File `"$(Join-Path $run.Package 'Install-OpenCodeRemote.ps1')`"")) 'exact command missing'
+        Assert-True ($run.Output -match 'Nothing was read, connected or sent') 'deferral does not say that nothing happened'
+        Assert-Equal (@($run.Calls | Where-Object { $_ -eq 'Install-UserConfiguration' }).Count) 1 'user configuration missing'
+    }
+}
+
+Invoke-Case 'package: the installer requires the shipped principal script and the build ships it' {
+    Assert-True ($installerText.Contains("'Set-OpenCodePrincipal.ps1'")) 'installer does not require the principal script'
+    $package = New-SyntheticPackage
+    Remove-Item -LiteralPath (Join-Path $package 'Set-OpenCodePrincipal.ps1')
+    $failed = ''
+    try { & $script:ModifiedInstaller -SourceDir $package 3>$null 6>$null | Out-Null } catch { $failed = $_.Exception.Message }
+    Assert-True ($failed -match 'Package is incomplete, missing Set-OpenCodePrincipal.ps1') "missing helper not reported: $failed"
+    $buildText = [System.IO.File]::ReadAllText((Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path) 'Build-OpenCodeCubeOne.ps1'))
+    Assert-True ($buildText -match "Copy-Item[^\r\n]*'Set-OpenCodePrincipal\.ps1'") 'build does not copy the principal script'
+    Assert-True ($buildText -match "Copy-Item[^\r\n]*'Install-OpenCodeRemote\.ps1'") 'build does not copy the full remote script'
+}
+
+Invoke-Case 'no registry, ssh, wsl or identity code exists in the principal script' {
+    $directory = Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path
+    $helper = [System.IO.File]::ReadAllText((Join-Path $directory 'Set-OpenCodePrincipal.ps1'))
+    $code = $helper -replace '(?s)<#.*?#>', ''
+    Assert-True ($code -notmatch '(?i)Registry|HKLM|ssh\.exe|wsl\.exe|Send-File|sqlite|Scheduled' + 'Task|Credential|Get-OpenRouterKey') 'helper reaches outside the SSH config'
+    $helperAst = [System.Management.Automation.Language.Parser]::ParseInput($helper, [ref]$null, [ref]$null)
+    $commands = @($helperAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+    Assert-Equal ($commands -join ',') 'Join-Path' 'unexpected commands in the helper'
+    Assert-True ($helper.Contains('-PrincipalOnly')) 'helper does not use -PrincipalOnly'
 }
 
 Remove-Item -LiteralPath $script:TempRoot -Recurse -Force -ErrorAction SilentlyContinue

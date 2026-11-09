@@ -12,7 +12,15 @@
 
     The script must run as the Windows user who owns -ProfilePath: ssh.exe authenticates with that user's
     key and the key file ACL. A different identity (SYSTEM, another account) stops before anything is read,
-    connected or sent. Install-OpenCodeCubeOne.ps1 starts it as that user when it runs as SYSTEM.
+    connected or sent. Install-OpenCodeCubeOne.ps1 does not start it as that user: with -FullInstall it defers
+    and prints the command to run once as the profile user.
+
+    Besides the remote files, the run makes ssh send a personal CUBEONE_PRINCIPAL to the coding VMs (coding-vm-1 to
+    coding-vm-8) through the user's existing ~\.ssh\config (a missing one is not created). What ssh would send is read
+    offline with `ssh.exe -G -F <config> <alias>`, which prints settings and makes no connection. A config with
+    Include or `Match exec` is not evaluated and not changed. New lines are only inserted at the start of the file;
+    existing text, host keys and private keys stay as they are. -PrincipalOnly does just that and nothing else (see
+    Set-OpenCodePrincipal.ps1).
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +31,9 @@ param(
     [switch]$DesktopOnly,
     # Writes only the OpenRouter key from HKLM. No plugins, no desktop settings, no CLI install.
     [switch]$KeyOnly,
+    # Writes only the personal CUBEONE_PRINCIPAL into the existing ~\.ssh\config. No key read, no payload, no ssh
+    # connection, wsl, CLI install, plugin install or desktop host list. Only the offline `ssh.exe -G` is started.
+    [switch]$PrincipalOnly,
     # Limits the SSH part to one host alias from ~/.ssh/config, for a single on-demand or background setup
     # instead of a full company-wide run.
     [string]$OnlyHost
@@ -98,17 +109,208 @@ function Get-WslDistros {
     })
 }
 
+# The personal id is set for exactly these aliases (the coding VMs). What ssh would really use for them is read
+# offline with `ssh.exe -G`. The probe alias is a name the id must never reach.
+$principalAliases = @(1..8 | ForEach-Object { "coding-vm-$_" })
+$principalProbeAlias = 'cubeone-unrelated-probe'
+$principalVariable = 'CUBEONE_PRINCIPAL='
+$principalPattern = '^[A-Za-z0-9_-]{22,80}$'
+# What to do by hand when the file cannot be changed automatically. A blind two-line prefix would move the old
+# top-of-file settings into the block, and a second SetEnv line would hide the first one.
+$principalHandEdit = "Set it by hand for $($principalAliases -join ' '): keep an id that already exists for any of them, otherwise make one of 22 to 80 characters (A-Z a-z 0-9 _ -), for example [guid]::NewGuid().ToString('N') in PowerShell. Add CUBEONE_PRINCIPAL=<id> to the first SetEnv line that applies to each of these hosts and keep the variables and the Host scope that line already has (ssh uses only the first SetEnv line that applies and ignores later ones). Where no SetEnv applies to them yet, add the line 'Host $($principalAliases -join ' ')' with '    SetEnv CUBEONE_PRINCIPAL=<id>', followed by 'Host *', in front of the old settings at the top of the file, so those settings keep applying to every host."
+
+function Get-SshExecutable {
+    # The Windows OpenSSH client first (not a copy that comes with Git or another tool earlier in PATH).
+    $windowsSsh = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe'
+    if (Test-Path -LiteralPath $windowsSsh -PathType Leaf) { return $windowsSsh }
+    $found = Get-Command -Name 'ssh.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $found) {
+        throw 'ssh.exe (Windows OpenSSH client) was not found. It is needed to read the SSH config offline. The SSH config was not changed.'
+    }
+    return $found.Source
+}
+
+function Invoke-SshConfigDump {
+    # `ssh -G` only prints the settings ssh would use for an alias. It makes no connection, reads no key and
+    # needs no stdin. Output and stderr are parsed by the callers and never printed. A `Match exec` line would
+    # run a command here, which is why Assert-SshConfigSafeToEvaluate runs first. Every wait is bounded: a
+    # process that does not finish is killed and the call fails without any output.
+    param([string]$ConfigPath, [string]$Alias, [int]$TimeoutMilliseconds = 30000)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Get-SshExecutable
+    $psi.Arguments = '-G -F "' + $ConfigPath + '" -o CanonicalizeHostname=no ' + $Alias
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
+    $psi.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($psi)
+    try {
+        # Both streams are read at the same time, so a full pipe can never stop the process.
+        $outputRead = $process.StandardOutput.ReadToEndAsync()
+        $errorRead = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try { $process.Kill() } catch { $process.Refresh() }
+            [void]$process.WaitForExit(5000)
+            throw "ssh.exe -G did not finish within $TimeoutMilliseconds ms for the SSH config '$ConfigPath' and was stopped. It was not changed."
+        }
+        # The process has ended; its output is complete once both reads are. Still bounded.
+        if (-not $outputRead.Wait(5000) -or -not $errorRead.Wait(5000)) {
+            throw "ssh.exe -G left its output open for the SSH config '$ConfigPath'. It was not changed."
+        }
+        $text = $outputRead.GetAwaiter().GetResult()
+        [void]$errorRead.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
+    if ($exitCode -ne 0 -or $text -notmatch '(?m)^hostname ') {
+        throw "ssh.exe -G could not read the SSH config '$ConfigPath' (exit $exitCode). It was not changed. Check it with: ssh -G -F `"$ConfigPath`" $Alias"
+    }
+    return @($text -split '\r?\n' | Where-Object { $_ })
+}
+function Get-EffectiveSshSettings {
+    # SetEnv = the NAME=VALUE assignments ssh would send. Other = every other effective setting as one text.
+    # OpenSSH uses only the first SetEnv line that applies to a host and ignores all later ones.
+    param([string]$ConfigPath, [string]$Alias)
+    $lines = @(Invoke-SshConfigDump -ConfigPath $ConfigPath -Alias $Alias)
+    $assignments = @($lines | Where-Object { $_.StartsWith('setenv ', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.Substring(7) })
+    $others = @($lines | Where-Object { -not $_.StartsWith('setenv ', [System.StringComparison]::Ordinal) })
+    return [pscustomobject]@{ SetEnv = $assignments; Other = ($others -join "`n") }
+}
+
+function Get-BomLength {
+    param([byte[]]$Bytes)
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { return 3 }
+    return 0
+}
+
+function Assert-SshConfigSafeToEvaluate {
+    # Nothing is executed or followed here, the text is only read. ssh -G runs the command of every `Match exec`
+    # line, also in included files. A config with Include, or with a Match line that has exec, is not evaluated:
+    # the id is then set by hand.
+    param([string]$Text, [string]$ConfigPath)
+    foreach ($line in ($Text -split '\r\n|\n|\r')) {
+        $plain = ($line -replace '["'']', '').TrimStart()
+        if ($plain.StartsWith('#')) { continue }
+        if ($plain -match '^(?i)Include([ \t=]|$)') {
+            throw "SSH config '$ConfigPath' uses Include. Included files cannot be checked safely, so the personal id is not set automatically and the file was not changed. $principalHandEdit"
+        }
+        if ($plain -match '^(?i)Match([ \t=]|$)' -and $plain -match '(?i)(?<![\w.-])exec(?![\w.-])') {
+            throw "SSH config '$ConfigPath' has a Match line with exec, which would run a command when the config is read. The personal id is not set automatically and the file was not changed. $principalHandEdit"
+        }
+    }
+}
+
+function Get-PrincipalPlan {
+    # From what ssh really uses for the eight aliases: nothing to do, which id to write, or why nothing is written.
+    param([hashtable]$Before, [string]$ConfigPath)
+    $values = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    $missing = 0
+    $otherVariables = $false
+    foreach ($alias in $principalAliases) {
+        $covered = $false
+        foreach ($assignment in $Before[$alias].SetEnv) {
+            if ($assignment.StartsWith($principalVariable, [System.StringComparison]::Ordinal)) {
+                [void]$values.Add($assignment.Substring($principalVariable.Length))
+                $covered = $true
+            } else {
+                $otherVariables = $true
+            }
+        }
+        if (-not $covered) { $missing++ }
+    }
+    foreach ($value in $values) {
+        if (-not [regex]::IsMatch($value, $principalPattern)) {
+            throw "SSH config '$ConfigPath': ssh would send a CUBEONE_PRINCIPAL that is not 22 to 80 characters of A-Z, a-z, 0-9, _ and -. It was not changed. Fix or remove that SetEnv assignment."
+        }
+    }
+    if ($values.Count -gt 1) {
+        throw "SSH config '$ConfigPath': the coding VMs would get $($values.Count) different CUBEONE_PRINCIPAL values. It was not changed. Keep one."
+    }
+    $existing = ''
+    foreach ($value in $values) { $existing = $value }
+    if ($existing -and $missing -eq 0) {
+        return [pscustomobject]@{ Complete = $true; Principal = $existing }
+    }
+    if ($otherVariables) {
+        throw "SSH config '$ConfigPath': SetEnv already sends other variables to the coding VMs. ssh uses only the first SetEnv line that applies and ignores later ones, so a new line would hide them. It was not changed. $principalHandEdit"
+    }
+    return [pscustomobject]@{ Complete = $false; Principal = $existing }
+}
+
+function New-PrincipalConfigBytes {
+    # Only inserts at the start of the file (after a BOM). The block comes first so its SetEnv is the first that
+    # applies. `Host *` then puts the old top-of-file settings, which would otherwise end up inside the block,
+    # back to applying to every host. The old first Host line starts its own scope as before.
+    param([byte[]]$Bytes, [string]$Principal)
+    $bomLength = Get-BomLength -Bytes $Bytes
+    $text = [System.Text.Encoding]::GetEncoding(28591).GetString($Bytes, $bomLength, $Bytes.Length - $bomLength)
+    $eol = "`r`n"
+    if ($text.Contains("`n") -and -not $text.Contains("`r`n")) { $eol = "`n" }
+    $block = "Host $($principalAliases -join ' ')$eol    SetEnv $principalVariable$Principal$eol"
+    if ($text.Trim().Length -gt 0) { $block = $block + $eol + 'Host *' + $eol }
+    $insert = [System.Text.Encoding]::ASCII.GetBytes($block)
+    $result = New-Object byte[] ($Bytes.Length + $insert.Length)
+    [System.Array]::Copy($Bytes, 0, $result, 0, $bomLength)
+    [System.Array]::Copy($insert, 0, $result, $bomLength, $insert.Length)
+    [System.Array]::Copy($Bytes, $bomLength, $result, $bomLength + $insert.Length, $Bytes.Length - $bomLength)
+    return $result
+}
+
+function Assert-PrincipalConfigEffective {
+    # Dry run on a temporary copy, never on the real file: with the new text ssh must use exactly this id and
+    # nothing else of the eight aliases may change, and an unrelated alias must be unchanged in every setting.
+    param([byte[]]$NewBytes, [hashtable]$Before, [string]$Principal, [string]$ConfigPath)
+    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-principal-' + [guid]::NewGuid().ToString('N') + '.config')
+    [System.IO.File]::WriteAllBytes($temp, $NewBytes)
+    try {
+        $expected = "$principalVariable$Principal"
+        foreach ($alias in (@($principalAliases) + $principalProbeAlias)) {
+            $after = Get-EffectiveSshSettings -ConfigPath $temp -Alias $alias
+            $wanted = @($Before[$alias].SetEnv) -join "`n"
+            if ($alias -ne $principalProbeAlias) { $wanted = $expected }
+            if ($after.Other -ne $Before[$alias].Other -or (@($after.SetEnv) -join "`n") -ne $wanted) {
+                throw "SSH config '$ConfigPath': the check on a copy showed that the new lines would change more than the personal id for '$alias'. It was not changed."
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Set-DesktopPrincipal {
+    # Makes ssh send the same valid personal id to all eight coding VM aliases. What ssh would use is read offline
+    # with `ssh -G` (no connection). All eight already covered: nothing is written. Partly covered: the existing
+    # id is reused. Anything unclear (bad or different ids, other SetEnv variables that a new line would hide,
+    # Include, Match exec) stops with the file unchanged. The file is written in place and keeps its permissions.
     param([string]$ConfigPath)
     if (-not (Test-Path -LiteralPath $ConfigPath)) { return }
-    $text = [System.IO.File]::ReadAllText($ConfigPath)
-    if ($text -match '(?m)^[ \t]*SetEnv[ \t]+CUBEONE_PRINCIPAL=\S+') { return }
-    $bytes = New-Object byte[] 24
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-    $principal = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-    $block = "Host coding-vm-1 coding-vm-2 coding-vm-3 coding-vm-4 coding-vm-5 coding-vm-6 coding-vm-7 coding-vm-8`r`n    SetEnv CUBEONE_PRINCIPAL=$principal`r`n`r`n"
-    [System.IO.File]::WriteAllText($ConfigPath, $block + $text.TrimStart([char]0xFEFF))
+    $bytes = [System.IO.File]::ReadAllBytes($ConfigPath)
+    $bomLength = Get-BomLength -Bytes $bytes
+    $text = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes, $bomLength, $bytes.Length - $bomLength)
+    Assert-SshConfigSafeToEvaluate -Text $text -ConfigPath $ConfigPath
+
+    $before = @{}
+    foreach ($alias in (@($principalAliases) + $principalProbeAlias)) {
+        $before[$alias] = Get-EffectiveSshSettings -ConfigPath $ConfigPath -Alias $alias
+    }
+    $plan = Get-PrincipalPlan -Before $before -ConfigPath $ConfigPath
+    if ($plan.Complete) {
+        Write-Host 'SSH config already sends a personal OpenCode id to all coding VMs. Left unchanged.' -ForegroundColor Cyan
+        return
+    }
+    $principal = $plan.Principal
+    if (-not $principal) {
+        $random = New-Object byte[] 24
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($random) } finally { $rng.Dispose() }
+        $principal = [Convert]::ToBase64String($random).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    }
+    $newBytes = New-PrincipalConfigBytes -Bytes $bytes -Principal $principal
+    Assert-PrincipalConfigEffective -NewBytes $newBytes -Before $before -Principal $principal -ConfigPath $ConfigPath
+    # Writes into the existing file: its permissions and owner stay.
+    [System.IO.File]::WriteAllBytes($ConfigPath, $newBytes)
     Write-Host 'SSH config sends a personal OpenCode id to the coding VMs.' -ForegroundColor Green
 }
 
@@ -946,6 +1148,18 @@ Write-Output ("bytes=" + $k.Length + " hklm=" + $hklm)
 # First action of the run: nothing below (registry key, ssh, wsl, SSH config) runs under another identity.
 Assert-ProfileUserContext -ProfilePath $ProfilePath
 
+if ($PrincipalOnly) {
+    # Before anything is read, built or started: no registry key, no payload, no ssh connection, wsl, CLI or desktop
+    # list. The only process is the offline `ssh.exe -G` inside Set-DesktopPrincipal.
+    if ($KeyOnly -or $DesktopOnly) { throw '-PrincipalOnly cannot be combined with -KeyOnly or -DesktopOnly.' }
+    $principalConfig = Join-Path $ProfilePath '.ssh\config'
+    if (-not (Test-Path -LiteralPath $principalConfig -PathType Leaf)) {
+        throw "No SSH config at '$principalConfig'. Set up the SSH hosts for this user first; no config was created."
+    }
+    Set-DesktopPrincipal -ConfigPath $principalConfig
+    return
+}
+
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-remote-' + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $work 'payload'
@@ -964,7 +1178,12 @@ try {
     }
     # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
     # has no business touching the desktop's full server list or WSL.
-    Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath '.ssh\config')
+    try {
+        Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath '.ssh\config')
+    } catch {
+        $err = $_
+        Write-Warning "Personal OpenCode id not set: $($err.Exception.Message) The remote setup continues. Run Set-OpenCodePrincipal.ps1 after fixing the SSH config."
+    }
     if (-not $OnlyHost) {
         Register-DesktopSshHosts -ProfilePath $ProfilePath
     }

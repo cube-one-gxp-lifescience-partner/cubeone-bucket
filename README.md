@@ -48,22 +48,87 @@ configuration from `files/opencode-cubeone-<version>.zip`. The zip is built from
 `scripts/opencode-cubeone`. Published zips are immutable: every change of the scripts, rules, plugins or
 configuration is a new zip with the next free version.
 
-### Remote setup (WSL and Linux SSH hosts) and the identity it runs as
+### Default install and the personal id
 
-`Install-OpenCodeCubeOne.ps1` finishes with the setup of WSL distros and Linux SSH hosts
-(`Install-OpenCodeRemote.ps1`). `ssh.exe` signs in with the key and the key file permissions of the identity
-that runs it. Pointing `HOME` or `USERPROFILE` at another profile does not change that identity, so the setup
-only works as the Windows user who owns the profile.
+The default install is lean and local. `scoop install opencode-desktop` and the auto-updater write the managed
+configuration in `%ProgramData%\opencode` and the user's `~\.config\opencode`, and check that the OpenRouter keys
+exist in the registry. They start no `ssh` or `wsl`, read no SSH config, set no personal id and register no
+desktop hosts. This also holds when the installer runs as SYSTEM.
 
-| Installer runs as | Result |
+```powershell
+scoop install opencode-desktop
+```
+
+Each user sets the personal cube one id (`CUBEONE_PRINCIPAL`) once, on every machine, as that user. No
+administrator rights are needed. The script ships in the package:
+
+```powershell
+$source = Join-Path (scoop prefix opencode-desktop) 'cubeone'
+& "$source\Set-OpenCodePrincipal.ps1"
+```
+
+`Set-OpenCodePrincipal.ps1` (parameter `-ProfilePath`, default the current user's profile) makes ssh send
+`SetEnv CUBEONE_PRINCIPAL=<32 random URL-safe characters>` to `coding-vm-1` to `coding-vm-8` by adding a block to the
+**existing** `~\.ssh\config`. It reads no registry value, makes no SSH connection, starts no `wsl` or CLI installer
+and installs nothing.
+
+It decides from what ssh would really use, read **offline** with `ssh.exe -G -F <config> <alias>` for each of the
+eight aliases. `-G` only prints the effective settings. It connects to nothing and reads no key, and neither its
+output nor the config is printed. The Windows OpenSSH client (`%SystemRoot%\System32\OpenSSH\ssh.exe`) is used first.
+OpenSSH uses only the first `SetEnv` line that applies to a host and ignores all later ones, which is why a plain
+extra line would not be safe.
+
+- All eight aliases already get the same valid id (22 to 80 characters of `A-Z a-z 0-9 _ -`; quoted, from `Host *`
+  or next to other variables is fine): nothing is written, not even the timestamp.
+- Only some aliases get a valid id: that id is reused for all eight. An id under an unrelated `Host` does not count.
+- No alias gets one: 32 random characters (CSPRNG) are generated.
+- A missing SSH config is an error. Nothing is created and no host is invented.
+- Stops with the file unchanged and a message that says what to do by hand: a malformed id, different ids for
+  different aliases, other `SetEnv` variables for the eight aliases that a new line would hide, or a config that
+  `ssh.exe -G` cannot read.
+- **Not supported, left unchanged:** a config with `Include` (included files are not checked) or with a `Match` line
+  that has `exec`. `ssh -G` would run that command, so the config is only read as text and `ssh` is not started.
+  Those lines stay as they are and nothing is suggested to remove; the message says how to set the id by hand.
+- **Setting the id by hand** (for every case where the file is left unchanged): keep an id that already exists for
+  any of `coding-vm-1` to `coding-vm-8`; otherwise make one of 22 to 80 characters (`A-Z a-z 0-9 _ -`), for example
+  `[guid]::NewGuid().ToString('N')` in PowerShell. Add `CUBEONE_PRINCIPAL=<id>` to the **first `SetEnv` line that
+  applies** to each of the eight hosts and keep the variables and the `Host` scope that line already has (ssh
+  ignores every later `SetEnv` line). Only where no `SetEnv` applies to them yet, put
+  `Host coding-vm-1 ... coding-vm-8` with `    SetEnv CUBEONE_PRINCIPAL=<id>`, followed by `Host *`, in front of the
+  old settings at the top of the file, so those settings keep applying to every host. Never add just the two lines
+  at the top: that would move the old top-of-file settings into the block or hide an existing `SetEnv`.- The new text is only inserted at the very start of the file (after a BOM): the block with the eight aliases, then
+  `Host *` so settings that stood at the top of the file still apply to every host, then the original bytes. Before
+  anything is written, `ssh -G` is run on a temporary copy: the eight aliases must get exactly this id and nothing
+  else, and no other setting of the eight aliases or of an unrelated alias may change. Otherwise the file stays
+  as it is. The file is written in place and keeps its permissions. Host keys and private keys are not touched.
+### Full install (administrators) and the identity it runs as
+
+The full remote setup is still shipped, for administrators. It installs the managed configuration, the plugins
+and the OpenRouter key on WSL distros and Linux SSH hosts (`Install-OpenCodeRemote.ps1`). It is off unless asked
+for with `-FullInstall`:
+
+```powershell
+$source = Join-Path (scoop prefix opencode-desktop) 'cubeone'
+& "$source\Install-OpenCodeCubeOne.ps1" -SourceDir $source -FullInstall
+# or only the remote part, for example one host and no WSL (one alias per call):
+& "$source\Install-OpenCodeRemote.ps1" -SourceDir $source -SkipWsl -OnlyHost coding-vm-1
+```
+
+It needs the SSH keys of the Windows user who owns the profile and a server account with passwordless `sudo`
+(`sudo -n`). `ssh.exe` signs in with the key and the key file permissions of the identity that runs it. Pointing
+`HOME` or `USERPROFILE` at another profile does not change that identity, so the setup only works as the Windows
+user who owns the profile. An administrator who is a different Windows identity than the profile owner does not
+get a workaround: the setup is deferred, and there is no `sudo` or Windows impersonation.
+
+| `-FullInstall` runs as | Result |
 | --- | --- |
 | The profile user (for example `scoop install` in a normal session) | The remote setup runs directly. |
 | SYSTEM (auto-updater), or any other account | The Scoop install succeeds and the remote setup is **deferred**. Nothing is read, connected or sent. The warning contains the exact command to run once as the profile user. |
 | The profile cannot be matched to exactly one user account | Deferred as well, with the same command. |
 
-**The remote setup is not done automatically for SYSTEM.** This package does not start anything in the user's
-session; there is no hook in this repository that does. After an auto-updater run, the remote hosts keep their
-previous configuration until the user runs the command from the warning, for example:
+**The remote setup is never done automatically for SYSTEM.** This package does not start anything in the user's
+session; there is no hook in this repository that does. After the deferral, run the command from the warning as
+the profile user, for example:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<scoop app dir>\cubeone\Install-OpenCodeRemote.ps1" -SourceDir "<scoop app dir>\cubeone" -ProfilePath "C:\Users\<name>"
@@ -71,9 +136,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<scoop app dir>\cubeone
 
 The profile SID comes from `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList` (profile paths and SID
 names only). `Install-OpenCodeRemote.ps1` also checks this itself first and refuses to start when it is run by
-SYSTEM or for a profile that is not the profile of the running account. That covers `Update-OpenCodeKey.ps1` too.
-SSH host keys, the SSH config and the key file permissions are never changed by the setup.
-
+SYSTEM or for a profile that is not the profile of the running account. That covers `Update-OpenCodeKey.ps1` and
+`Set-OpenCodePrincipal.ps1` too. The full setup also sets the personal id the same way as `Set-OpenCodePrincipal.ps1` (offline `ssh -G`, same limits). If that cannot be done it prints a warning and continues; run `Set-OpenCodePrincipal.ps1` after fixing the SSH config. SSH host keys, private keys and the key file permissions are never changed by the setup.
 #### Result of a run
 
 A run counts its targets as succeeded, skipped or failed.
@@ -132,7 +196,7 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
    compares the managed folder byte by byte (SHA-256), so a file that differs only in its line endings makes
    every installation count as outdated. Some files of earlier packages have CRLF where git stores LF; copy the
    previous bytes of such unchanged files into the export before building.
-3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `managed`, `user`
+3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
 4. In `bucket/opencode-desktop.json` change only the zip URL (second `url` entry under `architecture.64bit`
    and the matching one in `autoupdate`) and its hash (second `hash` entry). Keep `version` and the hash of
