@@ -173,6 +173,29 @@ test('managed config: websearch and the native search backend are unchanged', ()
   assert.equal(stt.options.model, 'mistralai/voxtral-mini-transcribe-3-0');
 });
 
+// Plugins are found by their package folder, never by their position in the list, so a new plugin cannot break these.
+const pluginNamed = (config, name) => config.plugins.find((plugin) => (plugin.package ?? plugin).endsWith?.(`/${name}`));
+
+test('managed config: the GUI-only ssh hosts plugin is listed once, with no options, and its folder exists', () => {
+  const entries = managed.plugins.filter((plugin) => (plugin.package ?? plugin).endsWith?.('/cubeone-ssh-hosts'));
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0], { package: 'C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh-hosts' });
+  const folder = path.join(root, 'plugins', 'cubeone-ssh-hosts');
+  assert.ok(fs.existsSync(path.join(folder, 'gui-experimental.cjs')));
+  assert.equal(fs.existsSync(path.join(folder, 'server.js')), false, 'the plugin has no server part');
+});
+
+test('generator: writes the same ssh hosts plugin entry as the committed managed config', { skip }, () => {
+  const result = run(fixture());
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(pluginNamed(result.config, 'cubeone-ssh-hosts'), pluginNamed(managed, 'cubeone-ssh-hosts'));
+  assert.deepEqual(
+    result.config.plugins.map((plugin) => (plugin.package ?? plugin)).filter((name) => name.includes('/cubeone/plugins/')).sort(),
+    managed.plugins.map((plugin) => (plugin.package ?? plugin)).filter((name) => name.includes('/cubeone/plugins/')).sort(),
+    'the generator and the committed managed config list different cube one plugins',
+  );
+});
+
 test('memory seed: Auto at the cost tier on the managed provider', () => {
   assert.equal(memory.opencodeProvider, 'openrouter-zdr');
   assert.equal(memory.opencodeModel, AUTO);

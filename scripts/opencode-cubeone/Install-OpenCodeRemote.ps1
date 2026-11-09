@@ -28,6 +28,7 @@ param(
     [string]$ProfilePath = $env:USERPROFILE,
     [switch]$SkipWsl,
     [switch]$SkipSsh,
+    # Stops after the personal id step. It no longer writes a desktop host list (see the cubeone-ssh-hosts plugin).
     [switch]$DesktopOnly,
     # Writes only the OpenRouter key from HKLM. No plugins, no desktop settings, no CLI install.
     [switch]$KeyOnly,
@@ -314,60 +315,6 @@ function Set-DesktopPrincipal {
     Write-Host 'SSH config sends a personal OpenCode id to the coding VMs.' -ForegroundColor Green
 }
 
-function Register-DesktopSshHosts {
-    param([string]$ProfilePath)
-    $desktop = Join-Path $ProfilePath 'AppData\Roaming\ai.opencode.desktop'
-    if (-not (Test-Path -LiteralPath $desktop)) { return }
-    $names = @(@(Get-SshHosts -ConfigPath (Join-Path $ProfilePath '.ssh\config')) | Where-Object { $_ -match '^[A-Za-z0-9-]{1,80}$' -and $_ -notmatch '-win-' })
-    if ($names.Count -eq 0) { return }
-
-    $settingsPath = Join-Path $desktop 'opencode.settings'
-    if (-not (Test-Path -LiteralPath $settingsPath)) { [System.IO.File]::WriteAllText($settingsPath, '{}') }
-    $namesJson = ($names | ConvertTo-Json -Compress)
-    if ($names.Count -eq 1) { $namesJson = "[$namesJson]" }
-    $updater = @'
-const fs = require("fs")
-const file = process.argv[2]
-const names = JSON.parse(process.argv[3])
-const settings = JSON.parse(fs.readFileSync(file, "utf8"))
-const current = settings.ssh && Array.isArray(settings.ssh.servers) ? settings.ssh.servers : []
-const byId = new Map(current.filter((item) => item && item.id).map((item) => [item.id, item]))
-for (const name of names) {
-  if (!byId.has(name)) byId.set(name, { id: name, target: name, name })
-}
-settings.ssh = Object.assign({}, settings.ssh, { servers: [...byId.values()] })
-fs.writeFileSync(file, JSON.stringify(settings, null, "\t") + "\n")
-process.stdout.write(String(settings.ssh.servers.length))
-'@
-    $updaterFile = Join-Path ([System.IO.Path]::GetTempPath()) ('opencode-ssh-settings-' + [guid]::NewGuid().ToString('N') + '.js')
-    [System.IO.File]::WriteAllText($updaterFile, $updater)
-    try {
-        $previous = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $count = (& node $updaterFile $settingsPath $namesJson 2>&1 | Out-String).Trim()
-        $nodeExit = $LASTEXITCODE
-        $ErrorActionPreference = $previous
-        if ($nodeExit -ne 0 -or $count -notmatch '^\d+$') {
-            Write-Warning "Desktop SSH host list was not updated ($count). Remote installation continues."
-            return
-        }
-        Write-Host "Desktop lists $count SSH hosts for new projects." -ForegroundColor Green
-    } finally {
-        Remove-Item -LiteralPath $updaterFile -Force -ErrorAction SilentlyContinue
-    }
-
-    $db = Join-Path $desktop 'drafts.sqlite'
-    $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue
-    if (-not $sqlite -or -not (Test-Path -LiteralPath $db)) { return }
-    $servers = @($names | ForEach-Object { [pscustomobject]@{ id = $_; target = $_; name = $_ } })
-    $value = $servers | ConvertTo-Json -Compress -Depth 4
-    if ($servers.Count -eq 1) { $value = "[$value]" }
-    $value = $value.Replace("'", "''")
-    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    & sqlite3 $db "INSERT INTO state(name, key, value, updated_at) VALUES('plugin.ssh','servers','$value',$now) ON CONFLICT(name, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
-    if ($LASTEXITCODE -ne 0) { Write-Warning 'The desktop server list could not be written. Quit OpenCode and run this script again.' }
-}
-
 function Get-SshHosts {
     param([string]$ConfigPath)
     if (-not (Test-Path -LiteralPath $ConfigPath)) { return @() }
@@ -416,7 +363,7 @@ function New-LinuxPayload {
     Copy-Item -LiteralPath (Join-Path $Source 'managed\skills') -Destination (Join-Path $Destination 'skills') -Recurse
     $plugins = Join-Path $Destination 'cubeone\plugins'
     New-Item -ItemType Directory -Path $plugins -Force | Out-Null
-    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view', 'cubeone-sale')) {
+    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh-hosts', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view', 'cubeone-sale')) {
         Copy-PluginPayload -Name $name -From (Join-Path $Source "plugins\$name") -To (Join-Path $plugins $name)
     }
     $userTo = Join-Path $Destination 'user'
@@ -1176,16 +1123,13 @@ try {
         Assert-RemoteRunSucceeded -Tally $tally
         return
     }
-    # A targeted, single-host maintenance call (background auto-setup or the /ssh-einrichten command)
-    # has no business touching the desktop's full server list or WSL.
+    # The desktop's SSH server list is not written here: a script that overwrote the Desktop database would replace a
+    # list the user built. The cubeone-ssh-hosts plugin seeds an empty list from inside the Desktop app instead.
     try {
         Set-DesktopPrincipal -ConfigPath (Join-Path $ProfilePath '.ssh\config')
     } catch {
         $err = $_
         Write-Warning "Personal OpenCode id not set: $($err.Exception.Message) The remote setup continues. Run Set-OpenCodePrincipal.ps1 after fixing the SSH config."
-    }
-    if (-not $OnlyHost) {
-        Register-DesktopSshHosts -ProfilePath $ProfilePath
     }
     if ($DesktopOnly) { return }
     New-LinuxPayload -Source $SourceDir -Destination $payload

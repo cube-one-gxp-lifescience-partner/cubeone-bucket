@@ -670,6 +670,10 @@ $config = [ordered]@{
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-mcp'
         }
+        # GUI only, no server part. Fills an empty SSH server list of the Desktop app from the user's ~/.ssh/config.
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-ssh-hosts'
+        }
         # Translates a project's own .cursor/rules/*.mdc into OpenCode Skills, scoped to that project only.
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-cursor-skills'

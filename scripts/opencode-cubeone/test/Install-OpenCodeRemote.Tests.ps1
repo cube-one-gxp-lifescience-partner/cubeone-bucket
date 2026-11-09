@@ -105,6 +105,16 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             param([string]$Text)
             return $latin1.GetBytes($Text)
         }
+        function Get-FileSddl {
+            # Owner, group and DACL as SDDL, read from the file directly. Get-Acl needs PowerShell's ObjectSecurity type
+            # data, which fails to load on some installations ("Das Element Sddl ist bereits vorhanden").
+            param([string]$Path)
+            $sections = [System.Security.AccessControl.AccessControlSections]'Access,Owner,Group'
+            $info = New-Object System.IO.FileInfo $Path
+            if ($info.PSObject.Methods['GetAccessControl']) { $security = $info.GetAccessControl($sections) }
+            else { $security = [System.IO.FileSystemAclExtensions]::GetAccessControl($info) }
+            return $security.GetSecurityDescriptorSddlForm($sections)
+        }
         function Get-FileSha {
             param([string]$Path)
             return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
@@ -885,9 +895,9 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             $path = New-ConfigFile -Bytes (Get-Latin1Bytes "Host a`r`n")
             & icacls.exe $path /grant '*S-1-5-32-545:(R)' /Q | Out-Null
             $LASTEXITCODE | Should Be 0
-            $before = (Get-Acl -LiteralPath $path).Sddl
+            $before = Get-FileSddl $path
             Set-DesktopPrincipal -ConfigPath $path 6>$null
-            (Get-Acl -LiteralPath $path).Sddl | Should Be $before
+            (Get-FileSddl $path) | Should Be $before
             $latin1.GetString([System.IO.File]::ReadAllBytes($path)) | Should Match 'SetEnv CUBEONE_PRINCIPAL='
         }
 
@@ -919,7 +929,7 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             $principalText = [System.IO.File]::ReadAllText($scriptPath)
             # Every function that reaches outside the SSH config is replaced by a recorder that fails the call. The
             # identity guard is removed (it is tested above), nothing else is changed.
-            $outside = @('Send-File', 'Get-OpenRouterKey', 'Get-WslDistros', 'Register-DesktopSshHosts', 'New-LinuxPayload',
+            $outside = @('Send-File', 'Get-OpenRouterKey', 'Get-WslDistros', 'New-LinuxPayload',
                 'Get-SshHosts', 'Update-OpenRouterKeyOnTargets', 'Get-SshHostOs', 'Invoke-StagedScript', 'Invoke-RemoteScript',
                 'Invoke-RemoteCommand', 'New-RemoteStage', 'Get-ProfileImagePath')
             $principalEdits = @()
@@ -972,7 +982,7 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             $guardAt = $original.IndexOf('Assert-ProfileUserContext -ProfilePath $ProfilePath')
             $branchAt = $original.IndexOf('if ($PrincipalOnly)')
             ($guardAt -gt 0 -and $branchAt -gt $guardAt) | Should Be $true
-            foreach ($later in @('$utf8 = New-Object System.Text.UTF8Encoding $false', 'if ($KeyOnly) {', 'New-LinuxPayload -Source $SourceDir', '$key = Get-OpenRouterKey', '& tar.exe', 'Register-DesktopSshHosts -ProfilePath $ProfilePath')) {
+            foreach ($later in @('$utf8 = New-Object System.Text.UTF8Encoding $false', 'if ($KeyOnly) {', 'New-LinuxPayload -Source $SourceDir', '$key = Get-OpenRouterKey', '& tar.exe')) {
                 $at = $original.LastIndexOf($later)
                 $at | Should BeGreaterThan 0
                 ($branchAt -lt $at) | Should Be $true
@@ -1067,6 +1077,21 @@ Describe 'Install-OpenCodeRemote key and package transfer' {
             $helperCode -match '(?i)Registry|HKLM|ssh|wsl|sqlite|curl|npm|Get-OpenRouterKey|Send-File' | Should Be $false
             $branch = $principalAst.Find({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '$PrincipalOnly' }, $true)
             ($branch.Extent.Text -replace '(?m)^\s*#.*$', '') -match '(?i)Registry|HKLM|ssh\.exe|wsl|sqlite|Get-OpenRouterKey|Send-File|Register-Desktop' | Should Be $false
+        }
+    }
+
+    Context 'Desktop server list is no longer written by the setup scripts' {
+        It 'the full setup neither defines nor calls a desktop host list writer, and keeps Get-SshHosts for the rollout targets' {
+            $original = [System.IO.File]::ReadAllText($scriptPath)
+            $original | Should Not Match 'Register-DesktopSshHosts|sqlite3|opencode\.settings|drafts\.sqlite|ai\.opencode\.desktop|DesktopSshHosts\.ps1'
+            $original | Should Match 'function Get-SshHosts \{'
+            ([regex]::Matches($original, 'Get-SshHosts -ConfigPath \$sshConfig')).Count | Should Be 2
+            Test-Path -LiteralPath (Join-Path (Split-Path -Parent $scriptPath) 'DesktopSshHosts.ps1') | Should Be $false
+        }
+
+        It 'the Linux payload carries the plugin that the managed config lists' {
+            $original = [System.IO.File]::ReadAllText($scriptPath)
+            $original | Should Match "(?m)foreach \(\`$name in @\([^\r\n]*'cubeone-ssh-hosts'"
         }
     }
 

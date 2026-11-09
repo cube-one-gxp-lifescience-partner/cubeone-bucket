@@ -59,6 +59,40 @@ desktop hosts. This also holds when the installer runs as SYSTEM.
 scoop install opencode-desktop
 ```
 
+#### Desktop server list (plugin `cubeone-ssh-hosts`)
+
+The installer does not write the Desktop app's SSH server list, and no script of this package does. The managed
+configuration lists a GUI-only plugin, `cubeone-ssh-hosts`, that fills an **empty** list from inside the Desktop app,
+as the signed-in user, when the app starts. The app's built-in SSH plugin keeps its servers in one row of
+`drafts.sqlite` in the app's data folder (table `state`, name `plugin.ssh`, key `servers`, entries
+`{ id, target, name }`). The plugin's `main` part uses the app's own `node:sqlite` and:
+
+- reads the aliases from the `Host` lines of the current user's `~\.ssh\config` as text. Only plain aliases count:
+  letters, digits and `-`, starting with a letter or digit, no wildcard (`*`, `?`), no negation (`!`), no name
+  containing `-win-`. Each alias counts once, whatever its case.
+- writes them in one conditional statement inside one transaction, **only** if the row is missing or holds a valid
+  empty JSON list (whitespace allowed). A list with entries, a JSON `null`, an object, malformed text or any other
+  value is left exactly as it is, as is every other row.
+- never creates `drafts.sqlite` or any schema. If the file or its `state` table does not exist yet (first start of a
+  fresh install), it changes nothing and tries again at the next start.
+- remembers success in its own flag (`plugin.cubeone-ssh-hosts` / `seeded`, written through the plugin storage). The
+  flag is set after a successful seed or when the list already has entries, and never after "no alias", a missing
+  database, a missing table, an unreadable or odd value, or an error. With the flag set it does nothing, so a list
+  the user empties later stays empty.
+- starts no process (no `node`, `sqlite3`, `ssh`, `wsl`), reads no key, writes no settings file, changes no SSH
+  config or personal id, and is not run by the installer or by SYSTEM, only by the Desktop app of the user.
+
+**When it shows.** The app reads the list once and caches it, so a list that was written during a start can first
+appear at the **next** start of the Desktop app, not necessarily in the window that is already open. A first launch
+right after installing is therefore not guaranteed to show the servers; the second start does. The plugin shows no
+notice. An existing list is never touched, so users who built their list keep it, and the full setup
+(`Install-OpenCodeRemote.ps1`) no longer writes a host list either (it used to replace the database list).
+
+Not tested against a running Desktop app: the tests below run the plugin against the app's table layout, with a stub
+of the plugin SDK. The bundle contract (one CommonJS file, only shared modules, a `main` setup) was checked against
+the loader of Desktop 2.2.6, but loading a GUI-only package without a server part, and the first-start timing, were
+not observed live.
+
 Each user sets the personal cube one id (`CUBEONE_PRINCIPAL`) once, on every machine, as that user. No
 administrator rights are needed. The script ships in the package:
 
@@ -205,7 +239,7 @@ powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 3.4.0;
 The generator, the role mapping and the memory seed are tested with Node on synthetic catalogs (no network, no key):
 
 ```powershell
-node --test scripts\opencode-cubeone\test scripts\opencode-cubeone\plugins\cubeone-sale\test
+node --test scripts\opencode-cubeone\test scripts\opencode-cubeone\plugins\cubeone-sale\test scripts\opencode-cubeone\plugins\cubeone-ssh-hosts\test
 ```
 
 `Install-OpenCodeRemote.Tests.ps1` needs Pester 3.4, which is installed for Windows PowerShell. Under `pwsh`

@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-ssh-hosts",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: fills an empty SSH server list of the Desktop app from ~/.ssh/config",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./gui-experimental": "./gui-experimental.cjs"
+  },
+  "scripts": {
+    "test": "node --test test/ssh-hosts.test.js"
+  }
+}

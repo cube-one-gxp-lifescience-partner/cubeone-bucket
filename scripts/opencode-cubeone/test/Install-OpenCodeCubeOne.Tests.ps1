@@ -681,6 +681,7 @@ function New-SyntheticPackage {
         'plugins\cubeone-pty\server.js', 'plugins\cubeone-pty\node_modules\opencode-pty\index.js',
         'plugins\cubeone-vorgaben\server.js', 'plugins\cubeone-vorgaben\gui-experimental.cjs',
         'plugins\cubeone-mcp\server.js', 'plugins\cubeone-mcp\gui-experimental.cjs',
+        'plugins\cubeone-ssh-hosts\gui-experimental.cjs', 'plugins\cubeone-ssh-hosts\package.json',
         'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js',
         'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js',
         'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js',
@@ -814,6 +815,21 @@ Invoke-Case 'package: the installer requires the shipped principal script and th
     $buildText = [System.IO.File]::ReadAllText((Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path) 'Build-OpenCodeCubeOne.ps1'))
     Assert-True ($buildText -match "Copy-Item[^\r\n]*'Set-OpenCodePrincipal\.ps1'") 'build does not copy the principal script'
     Assert-True ($buildText -match "Copy-Item[^\r\n]*'Install-OpenCodeRemote\.ps1'") 'build does not copy the full remote script'
+}
+
+Invoke-Case 'ssh hosts plugin: the installer requires and stages it, the build and the Linux payload ship it, and the default install runs no host code itself' {
+    $directory = Split-Path -Parent (Resolve-Path -LiteralPath $InstallerPath).Path
+    foreach ($file in @('gui-experimental.cjs', 'package.json')) {
+        Assert-True ($installerText.Contains("plugins\cubeone-ssh-hosts\$file")) "installer does not require $file"
+        Assert-True (Test-Path -LiteralPath (Join-Path $directory "plugins\cubeone-ssh-hosts\$file")) "$file is missing in the repository"
+    }
+    Assert-True ($installerText -match "foreach \(\`$name in @\([^\r\n]*'cubeone-ssh-hosts'") 'installer does not stage the plugin into the managed folder'
+    $buildText = [System.IO.File]::ReadAllText((Join-Path $directory 'Build-OpenCodeCubeOne.ps1'))
+    Assert-True ($buildText -match "foreach \(\`$name in @\([^\r\n]*'cubeone-ssh-hosts'") 'build does not ship the plugin'
+    $remoteText = [System.IO.File]::ReadAllText((Join-Path $directory 'Install-OpenCodeRemote.ps1'))
+    Assert-True ($remoteText -match "foreach \(\`$name in @\([^\r\n]*'cubeone-ssh-hosts'") 'the Linux payload does not carry the plugin the managed config lists'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $directory 'DesktopSshHosts.ps1'))) 'a script that writes the desktop host list is back'
+    Assert-True ($installerText -notmatch 'sqlite|DatabaseSync|opencode\.settings|drafts\.sqlite|ai\.opencode\.desktop') 'the installer touches the desktop data'
 }
 
 Invoke-Case 'no registry, ssh, wsl or identity code exists in the principal script' {
