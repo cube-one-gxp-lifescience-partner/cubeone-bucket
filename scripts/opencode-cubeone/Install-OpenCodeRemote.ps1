@@ -363,7 +363,7 @@ function New-LinuxPayload {
     Copy-Item -LiteralPath (Join-Path $Source 'managed\skills') -Destination (Join-Path $Destination 'skills') -Recurse
     $plugins = Join-Path $Destination 'cubeone\plugins'
     New-Item -ItemType Directory -Path $plugins -Force | Out-Null
-    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh-hosts', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view', 'cubeone-sale')) {
+    foreach ($name in @('cubeone-stt', 'cubeone-pty', 'cubeone-vorgaben', 'cubeone-mcp', 'cubeone-ssh-hosts', 'cubeone-cursor-skills', 'cubeone-redmine', 'cubeone-dcp-view', 'cubeone-sale', 'cubeone-auto-pin')) {
         Copy-PluginPayload -Name $name -From (Join-Path $Source "plugins\$name") -To (Join-Path $plugins $name)
     }
     $userTo = Join-Path $Destination 'user'

@@ -1,0 +1,13 @@
+{
+  "name": "cubeone-auto-pin",
+  "version": "1.0.0",
+  "description": "cube one OpenCode plugin: keeps the model the auto router picked first for the rest of the session",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "scripts": {
+    "test": "node --test test/pin.test.js"
+  }
+}

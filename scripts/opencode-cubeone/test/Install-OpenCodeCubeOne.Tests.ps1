@@ -797,6 +797,7 @@ function New-SyntheticPackage {
         'plugins\cubeone-cursor-skills\server.js', 'plugins\cubeone-redmine\server.js',
         'plugins\cubeone-dcp-view\server.js', 'plugins\cubeone-dcp-view\display.js',
         'plugins\cubeone-sale\server.js', 'plugins\cubeone-sale\sale.js',
+        'plugins\cubeone-auto-pin\server.js', 'plugins\cubeone-auto-pin\pin.js',
         'user\opencode.jsonc', 'user\opencode-mem.jsonc', 'user\vorgaben\a.md', 'user\rules\optional\a.md',
         'Set-OpenCodePrincipal.ps1')
     foreach ($item in $required) {

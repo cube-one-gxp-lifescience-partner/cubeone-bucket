@@ -693,6 +693,10 @@ $config = [ordered]@{
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-sale'
         }
+        # Keeps the model the auto router picked first for the rest of the session (no provider mix in one history).
+        [ordered]@{
+            package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-auto-pin'
+        }
         # Runs after DCP. Removes compact ids and the compression reminder from the text the chat shows.
         [ordered]@{
             package = 'C:/ProgramData/opencode/cubeone/plugins/cubeone-dcp-view'
