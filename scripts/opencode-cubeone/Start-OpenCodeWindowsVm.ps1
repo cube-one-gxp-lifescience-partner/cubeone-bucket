@@ -16,11 +16,14 @@
     Port of the OpenCode service on the VM.
 .PARAMETER CheckOnly
     Performs a bounded connection check without generating a pairing link or changing the clipboard.
+.PARAMETER NoPause
+    Skips the final "press Enter" prompt that keeps the window open after the connection ends.
 .NOTES
     Author: Marvin Fenßel
     Created: 10.11.2026
     Changelog: 10.11.2026 - Select the VM from the SSH configuration instead of a fixed host.
     Changelog: 10.11.2026 - Support Linux VMs next to Windows VMs.
+    Changelog: 10.11.2026 - Show instructions and pause at the end for Start menu launches.
 #>
 [CmdletBinding()]
 param(
@@ -29,10 +32,12 @@ param(
     [int]$LocalPort,
     [ValidateRange(1024, 65535)]
     [int]$RemotePort = 28894,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Stop'
+$failed = $false
 . (Join-Path -Path $PSScriptRoot -ChildPath 'OpenCodeVmCommon.ps1')
 
 $sshProcess = $null
@@ -107,17 +112,25 @@ try {
     } else {
         Set-Clipboard -Value $pairingLink
         Write-Host ''
-        Write-Host "Tunnel aktiv: $baseUrl -> $sshTarget"
-        Write-Host 'Der einmalige Kopplungslink liegt in der Zwischenablage (5 Minuten gueltig).'
-        Write-Host 'In OpenCode: Server hinzufuegen (nicht SSH-Server) -> Link einfuegen.'
-        Write-Host "Als Namen $sshTarget eintragen, dann verbinden."
-        Write-Host 'Spaeter reicht es, diesen Tunnel zu starten und den gespeicherten Server auszuwaehlen.'
+        Write-Host "Tunnel aktiv: $baseUrl -> $sshTarget" -ForegroundColor Green
+        Write-Host ''
+        Write-Host 'Anleitung' -ForegroundColor Cyan
+        Write-Host '  1. Der einmalige Kopplungslink liegt in der Zwischenablage (5 Minuten gueltig).'
+        Write-Host '  2. In OpenCode Desktop: Server hinzufuegen (nicht "SSH-Server") waehlen.'
+        Write-Host '  3. Den Link mit Strg+V einfuegen.'
+        Write-Host "  4. Als Namen $sshTarget eintragen und verbinden."
+        Write-Host ''
+        Write-Host 'Beim naechsten Mal: dieses Programm starten und den gespeicherten Server waehlen.'
         Write-Host 'Dieses Fenster waehrend der Nutzung offen lassen. Strg+C beendet die Verbindung.'
         while (-not $sshProcess.HasExited) {
             Start-Sleep -Seconds 2
         }
         throw 'The SSH tunnel disconnected. Start the script again to reconnect.'
     }
+} catch {
+    $failed = $true
+    Write-Host ''
+    Write-Host "Fehler: $($_.Exception.Message)" -ForegroundColor Red
 } finally {
     if ($sshProcess) {
         if ($processStarted -and -not $sshProcess.HasExited) {
@@ -140,4 +153,13 @@ try {
             # Clipboard cleanup must not prevent tunnel cleanup or replace the original error.
         }
     }
+}
+
+# The window of a Start menu launch closes with the script, so wait before the message disappears.
+if (-not $CheckOnly -and -not $NoPause -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    Write-Host ''
+    [void](Read-Host 'Enter druecken zum Schliessen')
+}
+if ($failed) {
+    exit 1
 }
