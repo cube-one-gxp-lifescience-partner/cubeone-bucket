@@ -9,10 +9,10 @@ const readManifest = (name) => JSON.parse(fs.readFileSync(path.join(root, 'bucke
 const desktop = readManifest('opencode-desktop');
 const config = readManifest('opencode-cubeone');
 
-test('Desktop keeps the upstream 2.2.6 download, hash, CLI and shortcut', () => {
-    assert.equal(desktop.version, '2.2.6');
-    assert.equal(desktop.architecture['64bit'].url, 'https://opencode.ai/files/bin/2.2.6/opencode-desktop-win-x64.exe#/dl.7z');
-    assert.equal(desktop.architecture['64bit'].hash, 'ac52d2403711eee195924f7b5ac6d8609415bb07b9fff3b1206004a1f8a02906');
+test('Desktop keeps the upstream download, hash, CLI and shortcut', () => {
+    assert.match(desktop.version, /^\d+\.\d+\.\d+$/);
+    assert.equal(desktop.architecture['64bit'].url, `https://opencode.ai/files/bin/${desktop.version}/opencode-desktop-win-x64.exe#/dl.7z`);
+    assert.match(desktop.architecture['64bit'].hash, /^[a-f0-9]{64}$/);
     assert.deepEqual(desktop.bin, [['resources\\opencode-cli.exe', 'opencode']]);
     assert.deepEqual(desktop.shortcuts, [['OpenCode.exe', 'OpenCode']]);
     assert.equal(desktop.autoupdate.architecture['64bit'].url, 'https://opencode.ai/files/bin/$version/opencode-desktop-win-x64.exe#/dl.7z');
@@ -26,8 +26,8 @@ test('Desktop contains no configuration download, installer or managed uninstall
 });
 
 test('configuration has its own matching version and a one-way Desktop dependency', () => {
-    assert.equal(config.version, '1.1.21');
-    assert.match(config.url, /\/opencode-cubeone-1\.1\.21\.zip$/);
+    assert.match(config.version, /^\d+\.\d+\.\d+$/);
+    assert.ok(config.url.endsWith(`/opencode-cubeone-${config.version}.zip`));
     assert.equal(config.depends, 'opencode-desktop');
     assert.equal(desktop.depends, undefined);
     assert.equal(config.extract_to, undefined);
@@ -53,6 +53,14 @@ test('configuration uninstall and update cannot delete managed or personal files
     assert.equal(config.pre_install, undefined);
     assert.equal(config.post_install, undefined);
     assert.match(config.notes.join('\n'), /Personal files.*retained/);
+});
+
+test('builder packs the VM tunnel scripts with their shared helper', () => {
+    const builder = fs.readFileSync(path.join(root, 'scripts', 'opencode-cubeone', 'Build-OpenCodeCubeOne.ps1'), 'utf8');
+    for (const name of ['OpenCodeVmCommon.ps1', 'Start-OpenCodeWindowsVm.ps1', 'Maintain-OpenCodeWindowsVm.ps1']) {
+        assert.ok(builder.includes(`'${name}'`), name);
+        assert.ok(fs.existsSync(path.join(root, 'scripts', 'opencode-cubeone', name)), name);
+    }
 });
 
 test('migration documents the old uninstaller hazard and ordered forced reinstall', () => {

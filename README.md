@@ -43,13 +43,13 @@ wiki page.
 
 ## OpenCode Desktop and cube one configuration (separate packages)
 
-`bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version 2.2.6).
+`bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version in the manifest).
 `bucket/opencode-cubeone.json` depends on `opencode-desktop` and independently versions the cube one configuration
-(version 1.1.21) from `files/opencode-cubeone-1.1.21.zip`. The ZIP root contains the installer, `managed`, `user`
+(version 1.1.22) from `files/opencode-cubeone-1.1.22.zip`. The ZIP root contains the installer, `managed`, `user`
 and `plugins`, without a `cubeone` subdirectory. Existing installer sync functions are reused.
 Published zips are immutable: every change of the scripts, rules, plugins or configuration needs a new version.
 
-ZIP 1.1.21 is built from source commit `830fdef` and its SHA-256 is recorded in the configuration manifest.
+ZIP 1.1.22 is built from source commit `33d4b64` and its SHA-256 is recorded in the configuration manifest.
 The strict installer checks the actual managed file list and contents before confirming success.
 Desktop updates neither run that installer nor change machine or personal configuration.
 
@@ -252,6 +252,29 @@ reachable`) and never the raw output of `ssh`. A host is identified by `uname -s
 `Linux`) and, if that fails without a connection error, by a read-only PowerShell probe. The key is sent to a
 Windows host only after that probe identified it as Windows.
 
+### Connecting a coding VM to Desktop (tunnel scripts)
+
+The package ships `Start-OpenCodeWindowsVm.ps1`, `Maintain-OpenCodeWindowsVm.ps1` and their shared helper
+`OpenCodeVmCommon.ps1` in the app directory. They replace writing servers into the Desktop database: nothing is
+written to `drafts.sqlite`, and the install does not touch SSH or WSL.
+
+```powershell
+$source = scoop prefix opencode-cubeone
+& "$source\Start-OpenCodeWindowsVm.ps1"                           # numbered menu of your SSH hosts
+& "$source\Start-OpenCodeWindowsVm.ps1" -HostName coding-vm-3     # no menu
+& "$source\Maintain-OpenCodeWindowsVm.ps1" -HostName coding-vm-3  # keeps the tunnel up, retries every 10 s
+```
+
+- The host list is read from `~/.ssh/config` (`Host` aliases without wildcards; `Include` is not followed).
+  One alias is used without asking. Linux and Windows hosts are detected with `uname -s`.
+- `Start-...` starts the OpenCode service on the VM, opens an SSH port forward, creates the pairing link and
+  **copies it to the clipboard**. In Desktop choose *Add server* (not *SSH server*) and paste the link. Keep the
+  window open: closing it ends the tunnel and clears the clipboard if it still holds the link.
+- The local port is derived from the alias (42000-43999) so several VMs keep distinct addresses. `coding-vm-win-1`
+  keeps its earlier port 42894. `-LocalPort` and `-RemotePort` (default 28894, the port of the OpenCode service on
+  the VM) override both. `-CheckOnly` tests the connection without pairing.
+- Only one tunnel per alias can run at a time. The file names still say `WindowsVm` for compatibility.
+
 ### Models and agent roles
 
 The default model and the model of every role is **Auto (ZDR, EU)**: `openrouter-zdr/openrouter/auto`. This is the
@@ -339,11 +362,11 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
    compares the managed folder byte by byte (SHA-256), so a file that differs only in its line endings makes
    every installation count as outdated. Some files of earlier packages have CRLF where git stores LF; copy the
    previous bytes of such unchanged files into the export before building.
-3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, `managed`, `user`
+3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, the VM tunnel scripts, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
 4. In `bucket/opencode-cubeone.json` update `version`, the ZIP `url` and its SHA-256 `hash` together.
-   ZIP 1.1.21 contains 4145 files: 4143 are byte-identical to 1.1.20 and two changed files
-   (`Set-OpenCodePrincipal.ps1`, `plugins/cubeone-mcp/gui-experimental.cjs`) match their committed sources.
+   ZIP 1.1.22 contains 4148 files: 4145 are byte-identical to 1.1.21 and three added files
+   (`OpenCodeVmCommon.ps1`, `Start-OpenCodeWindowsVm.ps1`, `Maintain-OpenCodeWindowsVm.ps1`) match their committed sources.
     Production dependencies were reused without an update.
    Do not release with a placeholder or without testing the strict managed installer. Leave
    `bucket/opencode-desktop.json` unchanged for configuration releases. Desktop updates use its own upstream
