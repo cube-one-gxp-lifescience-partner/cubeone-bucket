@@ -10,6 +10,7 @@
     Author: Marvin Fenßel
     Created: 09.11.2026
     Changelog: 09.11.2026 - Document the independently versioned configuration package.
+    Changelog: 10.11.2026 - Pack the Windows VM tunnel scripts.
 #>
 [CmdletBinding()]
 param(
@@ -33,6 +34,9 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'Install-OpenCodeCubeOne.ps1') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $root 'Install-OpenCodeRemote.ps1') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $root 'Set-OpenCodePrincipal.ps1') -Destination $staging
+    foreach ($tunnelScript in 'OpenCodeVmCommon.ps1', 'Start-OpenCodeWindowsVm.ps1', 'Maintain-OpenCodeWindowsVm.ps1') {
+        Copy-Item -LiteralPath (Join-Path $root $tunnelScript) -Destination $staging
+    }
     $plugin = Join-Path $staging 'plugins\cubeone-stt'
     New-Item -ItemType Directory -Path (Join-Path $plugin 'dist') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root 'plugins\cubeone-stt\package.json') -Destination $plugin

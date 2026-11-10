@@ -1,80 +1,59 @@
 <#
 .SYNOPSIS
-    Connects the Windows coding VM to OpenCode Desktop through a loopback-only SSH tunnel.
+    Connects a coding VM to OpenCode Desktop through a loopback-only SSH tunnel.
 .DESCRIPTION
-    Starts the VM's existing OpenCode service and keeps its SSH session alive. The one-time pairing
-    link is copied to the local clipboard without printing or persisting credentials. Keep this
-    terminal open while using the connection. Existing SSH configuration supplies the user and key.
+    Reads the host aliases from the user's SSH configuration, asks which VM to connect, starts that
+    VM's existing OpenCode service and keeps its SSH session alive. The one-time pairing link is
+    copied to the local clipboard without printing or persisting credentials. Keep this terminal
+    open while using the connection. Existing SSH configuration supplies the user and key. The VM
+    can be a Windows or a Linux machine with OpenCode installed; the system is detected over SSH.
+.PARAMETER HostName
+    SSH host alias of the VM. Without it, the aliases from ~/.ssh/config are offered for selection.
+.PARAMETER LocalPort
+    Loopback port of the tunnel. Defaults to a stable port derived from the host alias, so each VM
+    keeps its own saved server in OpenCode Desktop.
+.PARAMETER RemotePort
+    Port of the OpenCode service on the VM.
 .PARAMETER CheckOnly
     Performs a bounded connection check without generating a pairing link or changing the clipboard.
 .NOTES
     Author: Marvin Fenßel
+    Created: 10.11.2026
+    Changelog: 10.11.2026 - Select the VM from the SSH configuration instead of a fixed host.
+    Changelog: 10.11.2026 - Support Linux VMs next to Windows VMs.
 #>
 [CmdletBinding()]
 param(
+    [string]$HostName,
+    [ValidateRange(1024, 65535)]
+    [int]$LocalPort,
+    [ValidateRange(1024, 65535)]
+    [int]$RemotePort = 28894,
     [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
-$sshTarget = 'coding-vm-win-1'
-$localPort = 42894
-$remotePort = 28894
-$baseUrl = "http://127.0.0.1:$localPort"
+. (Join-Path -Path $PSScriptRoot -ChildPath 'OpenCodeVmCommon.ps1')
+
 $sshProcess = $null
 $processStarted = $false
 $pairingLink = $null
-$listener = $null
 
 try {
-    $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback), $localPort
-    $listener.Server.ExclusiveAddressUse = $true
-    try {
-        $listener.Start()
-    } catch {
-        throw "Local port $localPort is unavailable. Close an existing Windows-VM tunnel and try again."
-    } finally {
-        $listener.Stop()
+    $sshTarget = Resolve-SshHostAlias -HostName $HostName
+    if (-not $PSBoundParameters.ContainsKey('LocalPort')) {
+        $LocalPort = Get-TunnelLocalPort -Alias $sshTarget
+    }
+    $baseUrl = "http://127.0.0.1:$LocalPort"
+    if (-not (Test-LocalTunnelPort -Port $LocalPort)) {
+        throw "Local port $LocalPort is unavailable. Close an existing tunnel to $sshTarget or pass -LocalPort."
     }
 
-    $remoteScript = @'
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-$env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' +
-    [Environment]::GetEnvironmentVariable('PATH', 'User')
-$env:OPENCODE_DISABLE_FREE_MODELS = '1'
-try {
-    $startupOutput = & opencode service start 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'startup' }
-    $statusOutput = (& opencode service status 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $statusOutput -ne 'http://127.0.0.1:28894') { throw 'address' }
-    $infoOutput = & opencode api get /api/info 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'health' }
-    $info = ($infoOutput | Out-String) | ConvertFrom-Json
-    if (-not $info.version) { throw 'version' }
-
-    if ('__CHECK_ONLY__' -eq 'true') {
-        [Console]::Out.WriteLine('OPENCODE_READY=' + $info.version)
-    } else {
-        $pairOutput = (& opencode pair --url http://127.0.0.1:42894 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 0) { throw 'pairing' }
-        $match = [regex]::Match($pairOutput, 'http://127\.0\.0\.1:42894/auth/connect/[A-Za-z0-9_-]+')
-        if (-not $match.Success) { throw 'pairing' }
-        [Console]::Out.WriteLine('OPENCODE_PAIR=' + $match.Value)
-    }
-    [Console]::Out.Flush()
-    # Closing the local control pipe ends the SSH session and its Windows job cleanly.
-    [void][Console]::In.ReadLine()
-} catch {
-    [Console]::Error.WriteLine('OpenCode startup or pairing failed on the Windows VM.')
-    exit 1
-}
-'@
-    $remoteScript = $remoteScript.Replace('__CHECK_ONLY__', $CheckOnly.IsPresent.ToString().ToLowerInvariant())
-    $encodedScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
-    $forward = "127.0.0.1:${localPort}:127.0.0.1:$remotePort"
-    $remoteCommand = 'powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ' +
-        $encodedScript
+    Write-Host "Pruefe $sshTarget ..."
+    $remoteOs = Get-RemoteHostOs -Target $sshTarget
+    $mode = if ($CheckOnly) { 'Check' } else { 'Pair' }
+    $remoteCommand = Get-RemoteSessionCommand -Os $remoteOs -Mode $mode -RemotePort $RemotePort -LocalPort $LocalPort
+    $forward = "127.0.0.1:${LocalPort}:127.0.0.1:$RemotePort"
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = (Get-Command ssh.exe -CommandType Application | Select-Object -First 1).Source
@@ -87,7 +66,7 @@ try {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
 
-    Write-Host 'Verbinde mit coding-vm-win-1 ...'
+    Write-Host "Verbinde mit $sshTarget ($remoteOs) ..."
     $sshProcess = New-Object System.Diagnostics.Process
     $sshProcess.StartInfo = $startInfo
     [void]$sshProcess.Start()
@@ -96,6 +75,7 @@ try {
     $diagnostics = $sshProcess.StandardError.ReadToEndAsync()
     $deadline = [DateTime]::UtcNow.AddSeconds(90)
     $ready = $false
+    $pairPattern = '^OPENCODE_PAIR=(http://127\.0\.0\.1:' + $LocalPort + '/auth/connect/[A-Za-z0-9_-]+)$'
     $readLine = $sshProcess.StandardOutput.ReadLineAsync()
     while ([DateTime]::UtcNow -lt $deadline) {
         if (-not $readLine.Wait(1000)) { continue }
@@ -106,7 +86,6 @@ try {
             $ready = $true
             break
         }
-        $pairPattern = '^OPENCODE_PAIR=(http://127\.0\.0\.1:42894/auth/connect/[A-Za-z0-9_-]+)$'
         if (-not $CheckOnly -and $line -match $pairPattern) {
             $pairingLink = $Matches[1]
             $ready = $true
@@ -115,26 +94,11 @@ try {
         $readLine = $sshProcess.StandardOutput.ReadLineAsync()
     }
     if (-not $ready) {
-        throw 'The VM did not become ready. Check SSH connectivity and the OpenCode installation on the VM.'
+        throw "$sshTarget did not become ready. Check that OpenCode is installed there and listens on port $RemotePort (-RemotePort)."
     }
 
     # The unauthenticated forwarded endpoint must remain password-protected.
-    $request = [System.Net.HttpWebRequest]::Create("$baseUrl/api/info")
-    $request.Proxy = $null
-    $request.Timeout = 5000
-    $request.AllowAutoRedirect = $false
-    $httpStatus = $null
-    try {
-        $response = $request.GetResponse()
-        $httpStatus = [int]$response.StatusCode
-        $response.Close()
-    } catch [System.Net.WebException] {
-        if ($_.Exception.Response) {
-            $httpStatus = [int]$_.Exception.Response.StatusCode
-            $_.Exception.Response.Close()
-        }
-    }
-    if ($httpStatus -ne 401) {
+    if (-not (Test-TunnelAuthChallenge -Port $LocalPort)) {
         throw 'The forwarded server did not return the expected authentication challenge.'
     }
 
@@ -146,13 +110,13 @@ try {
         Write-Host "Tunnel aktiv: $baseUrl -> $sshTarget"
         Write-Host 'Der einmalige Kopplungslink liegt in der Zwischenablage (5 Minuten gueltig).'
         Write-Host 'In OpenCode: Server hinzufuegen (nicht SSH-Server) -> Link einfuegen.'
-        Write-Host 'Als Namen coding-vm-win-1 (Windows VM) eintragen, dann verbinden.'
+        Write-Host "Als Namen $sshTarget eintragen, dann verbinden."
         Write-Host 'Spaeter reicht es, diesen Tunnel zu starten und den gespeicherten Server auszuwaehlen.'
         Write-Host 'Dieses Fenster waehrend der Nutzung offen lassen. Strg+C beendet die Verbindung.'
         while (-not $sshProcess.HasExited) {
             Start-Sleep -Seconds 2
         }
-        throw 'The SSH tunnel disconnected. Start the shortcut again to reconnect.'
+        throw 'The SSH tunnel disconnected. Start the script again to reconnect.'
     }
 } finally {
     if ($sshProcess) {
