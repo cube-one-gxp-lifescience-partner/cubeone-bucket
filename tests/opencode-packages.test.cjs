@@ -62,6 +62,16 @@ test('builder packs the VM tunnel scripts with their shared helper', () => {
     }
 });
 
+test('the auto pin plugin is configured, packed and installed on every path', () => {
+    const base = path.join(root, 'scripts', 'opencode-cubeone');
+    const read = (name) => fs.readFileSync(path.join(base, name), 'utf8');
+    assert.ok(fs.existsSync(path.join(base, 'plugins', 'cubeone-auto-pin', 'server.js')));
+    assert.match(read('managed/opencode.jsonc'), /plugins\/cubeone-auto-pin"/);
+    for (const name of ['Build-OpenCodeCubeOne.ps1', 'Install-OpenCodeCubeOne.ps1', 'Install-OpenCodeRemote.ps1', 'Update-OpenCodeModels.ps1']) {
+        assert.ok(read(name).includes('cubeone-auto-pin'), name);
+    }
+});
+
 test('Start menu shortcut launches the packed tunnel script and its window stays open', () => {
     assert.equal(config.shortcuts.length, 1);
     const [target, name, args] = config.shortcuts[0];

@@ -45,11 +45,11 @@ wiki page.
 
 `bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version in the manifest).
 `bucket/opencode-cubeone.json` depends on `opencode-desktop` and independently versions the cube one configuration
-(version 1.1.23) from `files/opencode-cubeone-1.1.23.zip`. The ZIP root contains the installer, `managed`, `user`
+(version 1.1.24) from `files/opencode-cubeone-1.1.24.zip`. The ZIP root contains the installer, `managed`, `user`
 and `plugins`, without a `cubeone` subdirectory. Existing installer sync functions are reused.
 Published zips are immutable: every change of the scripts, rules, plugins or configuration needs a new version.
 
-ZIP 1.1.23 is built from source commit `b314266` and its SHA-256 is recorded in the configuration manifest.
+ZIP 1.1.24 is built from source commit `06b0391` and its SHA-256 is recorded in the configuration manifest.
 The strict installer checks the actual managed file list and contents before confirming success.
 Desktop updates neither run that installer nor change machine or personal configuration.
 
@@ -303,6 +303,15 @@ The role prompts and permissions did not change. If Auto (ZDR, EU) cannot be bui
 router or every EU image/PDF model is missing from the catalog, `Update-OpenCodeModels.ps1` stops and writes no
 file. It does not fall back to another model, to SALE or to a non-EU endpoint.
 
+The plugin `cubeone-auto-pin` keeps the router from switching models inside one session. Mixing providers in one
+history makes OpenRouter reject the request ("encrypted reasoning ... from multiple providers"). The first model
+the router reports in the answer of a session is stored per session; every later request of that session is sent
+to this model instead of the router. The pin applies to the chat and to compaction, not to titles. It is only
+applied when the model is on the allow-list of that very request, so the allow-list (SALE narrowing included) still
+decides, and the provider block with ZDR and the EU endpoints stays untouched. A new session routes freely again.
+The hooks are the same V2 `http.request`/`http.response` hooks as in `cubeone-sale`; the unit tests use fake events,
+a live OpenRouter request was not part of the tests.
+
 Web search and dictation are separate: native search stays on its pinned Luna model at the `azure/eu` endpoint and
 dictation on Voxtral. Neither depends on the model of `researcher`. The Zero Data Retention and EU guarantees above
 cover model inference only. The native web search is an OpenRouter server tool (see its documentation) and is
@@ -332,7 +341,7 @@ powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 3.4.0;
 The generator, the role mapping and the memory seed are tested with Node on synthetic catalogs (no network, no key):
 
 ```powershell
-node --test scripts\opencode-cubeone\test scripts\opencode-cubeone\plugins\cubeone-sale\test scripts\opencode-cubeone\plugins\cubeone-ssh-hosts\test
+node --test scripts\opencode-cubeone\test scripts\opencode-cubeone\plugins\cubeone-sale\test scripts\opencode-cubeone\plugins\cubeone-auto-pin\test scripts\opencode-cubeone\plugins\cubeone-ssh-hosts\test
 ```
 
 `Install-OpenCodeRemote.Tests.ps1` needs Pester 3.4, which is installed for Windows PowerShell. Under `pwsh`
@@ -368,8 +377,8 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
 3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, the VM tunnel scripts, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
 4. In `bucket/opencode-cubeone.json` update `version`, the ZIP `url` and its SHA-256 `hash` together.
-   ZIP 1.1.23 contains 4148 files: 4147 are byte-identical to 1.1.22 and one changed file
-   (`Start-OpenCodeWindowsVm.ps1`) matches its committed source.
+   ZIP 1.1.24 contains 4151 files: 4145 are byte-identical to 1.1.23, three changed files (both installers,
+   `managed/opencode.jsonc`) and the three files of `cubeone-auto-pin` are new; all match their committed source.
     Production dependencies were reused without an update.
    Do not release with a placeholder or without testing the strict managed installer. Leave
    `bucket/opencode-desktop.json` unchanged for configuration releases. Desktop updates use its own upstream
