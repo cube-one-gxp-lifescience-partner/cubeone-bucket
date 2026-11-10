@@ -32,7 +32,6 @@ test('configuration has its own matching version and a one-way Desktop dependenc
     assert.equal(desktop.depends, undefined);
     assert.equal(config.extract_to, undefined);
     assert.equal(config.bin, undefined);
-    assert.equal(config.shortcuts, undefined);
     assert.match(config.hash, /^[a-f0-9]{64}$/);
     assert.doesNotMatch(JSON.stringify(config), /PLACEHOLDER|NOT READY FOR RELEASE/);
     const archive = fs.readFileSync(path.join(root, 'files', path.basename(config.url)));
@@ -61,6 +60,18 @@ test('builder packs the VM tunnel scripts with their shared helper', () => {
         assert.ok(builder.includes(`'${name}'`), name);
         assert.ok(fs.existsSync(path.join(root, 'scripts', 'opencode-cubeone', name)), name);
     }
+});
+
+test('Start menu shortcut launches the packed tunnel script and its window stays open', () => {
+    assert.equal(config.shortcuts.length, 1);
+    const [target, name, args] = config.shortcuts[0];
+    assert.match(target, /\\WindowsPowerShell\\v1\.0\\powershell\.exe$/);
+    assert.equal(name, 'OpenCode VM verbinden');
+    assert.match(args, /-File "\$dir\\Start-OpenCodeWindowsVm\.ps1"$/);
+    assert.doesNotMatch(args, /-NoExit|-WindowStyle|-NoPause/);
+    const script = fs.readFileSync(path.join(root, 'scripts', 'opencode-cubeone', 'Start-OpenCodeWindowsVm.ps1'), 'utf8');
+    assert.match(script, /\[switch\]\$NoPause/);
+    assert.match(script, /Read-Host 'Enter druecken zum Schliessen'/);
 });
 
 test('migration documents the old uninstaller hazard and ordered forced reinstall', () => {
