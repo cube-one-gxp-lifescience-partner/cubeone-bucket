@@ -45,11 +45,11 @@ wiki page.
 
 `bucket/opencode-desktop.json` installs only the OpenCode Desktop app and CLI from opencode.ai (version in the manifest).
 `bucket/opencode-cubeone.json` depends on `opencode-desktop` and independently versions the cube one configuration
-(version 1.1.24) from `files/opencode-cubeone-1.1.24.zip`. The ZIP root contains the installer, `managed`, `user`
+(version 1.1.25) from `files/opencode-cubeone-1.1.25.zip`. The ZIP root contains the installer, `managed`, `user`
 and `plugins`, without a `cubeone` subdirectory. Existing installer sync functions are reused.
 Published zips are immutable: every change of the scripts, rules, plugins or configuration needs a new version.
 
-ZIP 1.1.24 is built from source commit `06b0391` and its SHA-256 is recorded in the configuration manifest.
+ZIP 1.1.25 is built from source commit `bd801e0` and its SHA-256 is recorded in the configuration manifest.
 The strict installer checks the actual managed file list and contents before confirming success.
 Desktop updates neither run that installer nor change machine or personal configuration.
 
@@ -377,8 +377,8 @@ transport is always replaced by a mock: no ssh, wsl, registry key or scheduled t
 3. Check the zip: it opens, contains `Install-OpenCodeCubeOne.ps1`, `Install-OpenCodeRemote.ps1`, `Set-OpenCodePrincipal.ps1`, the VM tunnel scripts, `managed`, `user`
    and `plugins`, and holds no `.env`, key or credential.
 4. In `bucket/opencode-cubeone.json` update `version`, the ZIP `url` and its SHA-256 `hash` together.
-   ZIP 1.1.24 contains 4151 files: 4145 are byte-identical to 1.1.23, three changed files (both installers,
-   `managed/opencode.jsonc`) and the three files of `cubeone-auto-pin` are new; all match their committed source.
+   ZIP 1.1.25 contains 4151 files: 4148 are byte-identical to 1.1.24 and three changed files
+   (`OpenCodeVmCommon.ps1`, `Start-OpenCodeWindowsVm.ps1`, `Maintain-OpenCodeWindowsVm.ps1`) match their committed source.
     Production dependencies were reused without an update.
    Do not release with a placeholder or without testing the strict managed installer. Leave
    `bucket/opencode-desktop.json` unchanged for configuration releases. Desktop updates use its own upstream
