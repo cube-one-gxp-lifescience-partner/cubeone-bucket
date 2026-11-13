@@ -15,7 +15,7 @@
     Loopback port of the tunnel. Defaults to the stable port derived from the host alias, the same
     one Start-OpenCodeWindowsVm.ps1 uses.
 .PARAMETER RemotePort
-    Port of the OpenCode service on the VM.
+    Port of the OpenCode service on the VM. Without it, the port is read from the running service.
 .PARAMETER CheckOnly
     Makes one bounded attempt, checks for an HTTP 401 on the forwarded endpoint, and closes the tunnel.
 .NOTES
@@ -23,6 +23,7 @@
     Created: 10.11.2026
     Changelog: 10.11.2026 - Initial implementation, VM selected from the SSH configuration.
     Changelog: 10.11.2026 - Support Linux VMs next to Windows VMs.
+    Changelog: 13.11.2026 - Read the service port from the VM when -RemotePort is not given.
 #>
 [CmdletBinding()]
 param(
@@ -30,7 +31,7 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$LocalPort,
     [ValidateRange(1024, 65535)]
-    [int]$RemotePort = 28894,
+    [int]$RemotePort,
     [switch]$CheckOnly
 )
 
@@ -214,13 +215,17 @@ function Invoke-WindowsVmSupervisor {
             if (-not (Test-SshForwardConfiguration -SshPath $sshPath -SshOptions $sshOptions -Target $Target)) {
                 throw 'SSH configuration check failed or contains additional forwards.'
             }
+            $remoteOs = Get-RemoteHostOs -Target $Target
+            $servicePort = if ($RemotePort -gt 0) { $RemotePort } else {
+                Get-RemoteServicePort -Target $Target -Os $remoteOs
+            }
             $connection = @{
                 SshPath    = $sshPath
                 SshOptions = $sshOptions
                 Target     = $Target
-                Os         = Get-RemoteHostOs -Target $Target
+                Os         = $remoteOs
                 LocalPort  = $LocalPort
-                RemotePort = $RemotePort
+                RemotePort = $servicePort
                 CheckOnly  = $CheckOnly
             }
             Invoke-WindowsVmTunnel @connection

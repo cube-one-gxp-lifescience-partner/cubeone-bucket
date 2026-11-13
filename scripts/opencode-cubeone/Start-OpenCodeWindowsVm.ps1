@@ -13,7 +13,7 @@
     Loopback port of the tunnel. Defaults to a stable port derived from the host alias, so each VM
     keeps its own saved server in OpenCode Desktop.
 .PARAMETER RemotePort
-    Port of the OpenCode service on the VM.
+    Port of the OpenCode service on the VM. Without it, the port is read from the running service.
 .PARAMETER CheckOnly
     Performs a bounded connection check without generating a pairing link or changing the clipboard.
 .PARAMETER NoPause
@@ -24,6 +24,7 @@
     Changelog: 10.11.2026 - Select the VM from the SSH configuration instead of a fixed host.
     Changelog: 10.11.2026 - Support Linux VMs next to Windows VMs.
     Changelog: 10.11.2026 - Show instructions and pause at the end for Start menu launches.
+    Changelog: 13.11.2026 - Read the service port from the VM; Linux VMs use a port per user.
 #>
 [CmdletBinding()]
 param(
@@ -31,7 +32,7 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$LocalPort,
     [ValidateRange(1024, 65535)]
-    [int]$RemotePort = 28894,
+    [int]$RemotePort,
     [switch]$CheckOnly,
     [switch]$NoPause
 )
@@ -56,6 +57,9 @@ try {
 
     Write-Host "Pruefe $sshTarget ..."
     $remoteOs = Get-RemoteHostOs -Target $sshTarget
+    if (-not $PSBoundParameters.ContainsKey('RemotePort')) {
+        $RemotePort = Get-RemoteServicePort -Target $sshTarget -Os $remoteOs
+    }
     $mode = if ($CheckOnly) { 'Check' } else { 'Pair' }
     $remoteCommand = Get-RemoteSessionCommand -Os $remoteOs -Mode $mode -RemotePort $RemotePort -LocalPort $LocalPort
     $forward = "127.0.0.1:${LocalPort}:127.0.0.1:$RemotePort"

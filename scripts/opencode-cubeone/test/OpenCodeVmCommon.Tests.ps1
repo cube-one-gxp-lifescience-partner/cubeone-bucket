@@ -318,6 +318,25 @@ try {
         if ($result.Output) { throw 'A marker was printed for a wrong service address.' }
     }
 
+    Invoke-Case 'remote command (Linux): Port mode prints the actual service port and ends' {
+        if (-not $bashPath) { Write-Output 'SKIP no bash available'; return }
+        $command = Get-RemoteSessionCommand -Os Linux -Mode Port -RemotePort 0 -LocalPort 0
+        $result = Invoke-LinuxScript -Command $command -StubPort 49374
+        if ($result.ExitCode -ne 0) { throw "Port mode exited with $($result.ExitCode): $($result.Errors)" }
+        if ($result.Output -cne 'OPENCODE_PORT=49374') { throw "Port mode printed '$($result.Output)'." }
+    }
+
+    Invoke-Case 'remote command (Windows): Port mode parses and prints the port without waiting' {
+        $command = Get-RemoteSessionCommand -Os Windows -Mode Port -RemotePort 0 -LocalPort 0
+        $prefix = 'powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand '
+        $text = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($command.Substring($prefix.Length)))
+        $errors = $null
+        $tokens = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+        if ($errors.Count -gt 0) { throw "Parse error in Port script: $($errors[0].Message)" }
+        if ($text -notmatch "OPENCODE_PORT=") { throw 'The port marker is missing.' }
+    }
+
     foreach ($scriptName in 'Start-OpenCodeWindowsVm.ps1', 'Maintain-OpenCodeWindowsVm.ps1') {
         Invoke-Case "$scriptName : parses and takes host and ports as parameters" {
             $errors = $null

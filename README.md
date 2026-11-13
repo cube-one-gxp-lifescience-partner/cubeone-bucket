@@ -271,8 +271,8 @@ $source = scoop prefix opencode-cubeone
   **copies it to the clipboard**. In Desktop choose *Add server* (not *SSH server*) and paste the link. Keep the
   window open: closing it ends the tunnel and clears the clipboard if it still holds the link.
 - The local port is derived from the alias (42000-43999) so several VMs keep distinct addresses. `coding-vm-win-1`
-  keeps its earlier port 42894. `-LocalPort` and `-RemotePort` (default 28894, the port of the OpenCode service on
-  the VM) override both. `-CheckOnly` tests the connection without pairing.
+  keeps its earlier port 42894. `-LocalPort` and `-RemotePort` (the port of the OpenCode service on the VM, read
+  from the running service by default, since Linux VMs use a port per user) override both. `-CheckOnly` tests the connection without pairing.
 - Only one tunnel per alias can run at a time. The file names still say `WindowsVm` for compatibility.
 - The Start menu entry **OpenCode VM verbinden** (folder *Scoop Apps*) runs `Start-OpenCodeWindowsVm.ps1`. The
   script prints a short German step-by-step guide and, after the connection ends or fails, waits for Enter so the

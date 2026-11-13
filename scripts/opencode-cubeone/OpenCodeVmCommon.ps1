@@ -278,7 +278,8 @@ function Get-RemoteSessionCommand {
     .PARAMETER Os
         Operating system of the VM, from Get-RemoteHostOs.
     .PARAMETER Mode
-        Check, Pair or Tunnel.
+        Check, Pair, Tunnel or Port. Port only prints OPENCODE_PORT=<port> of the running service
+        and ends without waiting.
     .PARAMETER RemotePort
         Port of the OpenCode service on the VM.
     .PARAMETER LocalPort
@@ -293,7 +294,7 @@ function Get-RemoteSessionCommand {
         [ValidateSet('Linux', 'Windows')]
         [string]$Os,
         [Parameter(Mandatory)]
-        [ValidateSet('Check', 'Pair', 'Tunnel')]
+        [ValidateSet('Check', 'Pair', 'Tunnel', 'Port')]
         [string]$Mode,
         [Parameter(Mandatory)]
         [int]$RemotePort,
@@ -313,7 +314,15 @@ try {
     $startupOutput = & opencode service start 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'startup' }
     $statusOutput = (& opencode service status 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $statusOutput -ne 'http://127.0.0.1:__REMOTE_PORT__') { throw 'address' }
+    if ($LASTEXITCODE -ne 0) { throw 'address' }
+    if ('__MODE__' -eq 'Port') {
+        $portMatch = [regex]::Match($statusOutput, '^http://127\.0\.0\.1:([0-9]+)$')
+        if (-not $portMatch.Success) { throw 'address' }
+        [Console]::Out.WriteLine('OPENCODE_PORT=' + $portMatch.Groups[1].Value)
+        [Console]::Out.Flush()
+        exit 0
+    }
+    if ($statusOutput -ne 'http://127.0.0.1:__REMOTE_PORT__') { throw 'address' }
     if ('__MODE__' -eq 'Tunnel') {
         [Console]::Out.WriteLine('OPENCODE_TUNNEL_READY')
     } else {
@@ -346,6 +355,13 @@ export PATH="$HOME/.opencode/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 fail() { echo 'OpenCode startup or pairing failed on the Linux VM.' >&2; exit 1; }
 opencode service start >/dev/null 2>&1 || fail
 status=$(opencode service status 2>/dev/null) || fail
+if [ '__MODE__' = 'Port' ]; then
+    port=${status#http://127.0.0.1:}
+    case "$port" in ''|*[!0-9]*) fail ;; esac
+    [ "$status" = "http://127.0.0.1:$port" ] || fail
+    echo "OPENCODE_PORT=$port"
+    exit 0
+fi
 [ "$status" = 'http://127.0.0.1:__REMOTE_PORT__' ] || fail
 if [ '__MODE__' = 'Tunnel' ]; then
     echo OPENCODE_TUNNEL_READY
@@ -376,4 +392,65 @@ read -r _line || true
     }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
     return 'sh -c \"$(printf %s ' + $encoded + ' | base64 -d)\"'
+}
+
+
+function Get-RemoteServicePort {
+    <#
+    .SYNOPSIS
+        Starts the OpenCode service on the VM and returns the loopback port it listens on.
+    .DESCRIPTION
+        The port differs per VM and user (Linux VMs assign one per principal), so it is read from
+        "opencode service status" instead of being assumed.
+    .PARAMETER Target
+        The SSH host alias.
+    .PARAMETER Os
+        Operating system of the VM, from Get-RemoteHostOs.
+    .NOTES
+        Author: Marvin Fenßel
+    #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Target,
+        [Parameter(Mandatory)]
+        [ValidateSet('Linux', 'Windows')]
+        [string]$Os
+    )
+
+    $remoteCommand = Get-RemoteSessionCommand -Os $Os -Mode Port -RemotePort 0 -LocalPort 0
+    $process = New-Object System.Diagnostics.Process
+    $started = $false
+    try {
+        $process.StartInfo.FileName = (Get-Command ssh.exe -CommandType Application | Select-Object -First 1).Source
+        $process.StartInfo.Arguments = '-o BatchMode=yes -o StrictHostKeyChecking=accept-new ' +
+            "-o ConnectTimeout=10 $Target `"$remoteCommand`""
+        $process.StartInfo.UseShellExecute = $false
+        $process.StartInfo.CreateNoWindow = $true
+        $process.StartInfo.RedirectStandardInput = $true
+        $process.StartInfo.RedirectStandardOutput = $true
+        $process.StartInfo.RedirectStandardError = $true
+        [void]$process.Start()
+        $started = $true
+        $process.StandardInput.Close()
+        $output = $process.StandardOutput.ReadToEndAsync()
+        $errors = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(60000)) {
+            throw "Reading the OpenCode port on $Target timed out."
+        }
+        [void]$output.Wait(1000)
+        $text = if ($output.IsCompleted) { $output.Result } else { '' }
+        $match = [regex]::Match($text, '(?m)^OPENCODE_PORT=([0-9]{4,5})\r?$')
+        if ($process.ExitCode -ne 0 -or -not $match.Success) {
+            throw "Could not read the OpenCode service port on $Target. Check that OpenCode is installed there."
+        }
+        return [int]$match.Groups[1].Value
+    } finally {
+        if ($started -and -not $process.HasExited) {
+            $process.Kill()
+            [void]$process.WaitForExit(5000)
+        }
+        $process.Dispose()
+    }
 }
