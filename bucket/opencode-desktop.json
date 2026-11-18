@@ -1,12 +1,12 @@
 {
-    "version": "2.3.0",
+    "version": "2.3.2",
     "description": "OpenCode Desktop application and CLI",
     "homepage": "https://opencode.ai",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://opencode.ai/files/bin/2.3.0/opencode-desktop-win-x64.exe#/dl.7z",
-            "hash": "21e4d45dd957ebe92d3ea693fc4a7f7bb5b50276046bf7b78767081dd37d685e"
+            "url": "https://opencode.ai/files/bin/2.3.2/opencode-desktop-win-x64.exe#/dl.7z",
+            "hash": "1e73b4f49f591971f4ad61c5a39b284bf74d41f50ca1b84e68ccf2ab2be91e8d"
         }
     },
     "installer": {
